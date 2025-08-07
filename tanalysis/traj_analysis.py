@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
     #limit tlags to min dt and max len(track)*dt
     #check all functions except msd
 
-def xml_to_xlsx(dirname, dt, xyscale=0.6363, zdist=5):
+def xml_to_xlsx(dirname, xyscale, zdist, dt):
     '''
     This function converts all xml files contained in a folder into a merged excel file with all data. One file is created for each condition
     directory tree should be something like:
@@ -25,6 +25,7 @@ def xml_to_xlsx(dirname, dt, xyscale=0.6363, zdist=5):
                     -...
                 -...
     Converted excel files will be saved in a folder names excel_files which will be contained in the Tracks folder. Excel files will have the condition folders names.
+
     Args:
         dirname (string): path to the folder containing the folders where xml files are saved
         dt (int): time step between frames
