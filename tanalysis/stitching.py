@@ -22,7 +22,7 @@ def pcm(image1:np.ndarray, image2:np.ndarray):
     F2 = np.fft.fft2(image2)
     FC = F1 * np.conjugate(F2)
     PCM = np.fft.ifft2(FC/np.abs(FC))
-    return PCM.real
+    return PCM.real.astype(np.float32)
 
 def multiPeakMax(PCM:np.ndarray, n:int = 2):
     """
@@ -37,12 +37,7 @@ def multiPeakMax(PCM:np.ndarray, n:int = 2):
     """
     row, col = np.unravel_index(np.argsort(np.ravel(PCM)), PCM.shape)
     vals = PCM[row[::-1], col[::-1]]
-    rows = row[::-1]
-    cols = col[::-1]
-    peaks = []
-    for i in range(0,n):
-        peaks.append(np.array([rows[i],cols[i],vals[i]]))
-    return np.asarray(peaks)
+    return np.array((row[::-1], col[::-1], vals))
 
 def ncc(image1:np.ndarray, image2:np.ndarray):
     """
@@ -59,29 +54,29 @@ def ncc(image1:np.ndarray, image2:np.ndarray):
     I1 = image1.flatten()
     I2 = image2.flatten()
     n = np.dot(I1 - np.mean(I1), I2 - np.mean(I2))
-    d = np.linalg.norm(I1 - np.mean(I1)) * np.linalg.norm(I1 - np.mean(I2))
+    d = np.linalg.norm(I1 - np.mean(I1)) * np.linalg.norm(I2 - np.mean(I2))
     return n/d
 
-def extractOverlapSubregion(image:np.ndarray, x:int, y:int):
+def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     """
     This function extracts the overlapping region with another image given the coordinates where the overlapping begins
 
     Args:
         image (ndArray): 2D image array where we want to determine the overlapping region
-        x (int): index of the row where the overlapping begins
-        y (int): index of the column where the overlapping begins
+        row (int): index of the row where the overlapping begins
+        col (int): index of the column where the overlapping begins
 
     Returns:
         ndArray: array containing the overlapping region of the given image
     """
     H,W = image.shape
-    colstart = int(max(0, min(y, W)))
-    colend = int(max(0, min(y+W, W)))
-    rowstart = int(max(0, min(x, H)))
-    rowend = int(max(0, min(x+H, H)))
+    colstart = int(max(0, min(col, W, key=int), key=int))
+    colend = int(max(0, min(col+W, W, key=int), key=int))
+    rowstart = int(max(0, min(row, H, key=int), key=int))
+    rowend = int(max(0, min(row+H, H, key=int), key=int))
     return image[rowstart:rowend, colstart:colend]
 
-def interpretTranslation(image1: np.ndarray, image2: np.ndarray, xin, yin, direction:str):
+def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n):
     """
     This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, which will correspond to the translation between the two images
 
@@ -100,30 +95,41 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, xin, yin, direc
     x = 0
     y = 0
     H,W = image1.shape
-    for rowmag in [xin, H-xin]:
-        for colmag in [yin, W-yin]:
+
+    rowmagss = [rowin, H-rowin]
+    rowmagss[1][rowmagss[0]==0]=0
+    colmagss = [colin, W-colin]
+    colmagss[1][colmagss[0]==0]=0
+
+    _poss = []
+    for rowmag in rowmagss:
+        for colmag in colmagss:
             for rowsign in [-1,1]:
                 for colsign in [-1,1]:
-                    if direction=='V' and rowsign==-1:
-                        continue
-                    elif direction=='H' and colsign==-1:
-                        continue
-                    subI1 = extractOverlapSubregion(image1, (rowmag*rowsign), (colmag*colsign))
-                    subI2 = extractOverlapSubregion(image2, -(rowmag*rowsign), -(colmag*colsign))
+                    _poss.append([rowmag*rowsign, colmag*colsign])
+    poss = np.array(_poss)
+    valid_ind = (
+        (rowmin <= poss[:, 0, :])
+        & (poss[:, 0, :] <= rowmax)
+        & (colmin <= poss[:, 1, :])
+        & (poss[:, 1, :] <= colmax)
+    )  
+    valid_ind = np.any(valid_ind, axis=0)
+
+    for pos in np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]:
+        for rowval, colval in pos:
+            if (colmin <= colval) and (colval <= colmax) and (rowmin <= rowval) and (rowval <= rowmax):
+                    subI1 = extractOverlapSubregion(image1, rowval, colval)
+                    subI2 = extractOverlapSubregion(image2, -rowval, -colval)
                     ncc_val = ncc(subI1, subI2)
                     if ncc_val>_ncc:
-                        _ncc = ncc_val
-                        x = rowsign*rowmag
-                        y = colsign*colmag
-                        ############################################## Check how to treat negative numbers
-                        """ if x<0:
-                            x = 1024+x
-                        if y<0:
-                            y = 1024+y """
+                        _ncc = float(ncc_val)
+                        x = int(rowval)
+                        y = int(colval)
     return np.asarray([_ncc,x,y])
     
 
-def pciam(image1:np.ndarray, image2:np.ndarray, direction:str):
+def pciam(image1:np.ndarray, image2:np.ndarray):
     """
     This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes the coordinates of the peaks for each peak
 
@@ -135,14 +141,11 @@ def pciam(image1:np.ndarray, image2:np.ndarray, direction:str):
     Returns:
         ndArray: tuple containing the peak with the max ncc value (ncc, x, y)
     """
-    assert direction=='V' or direction=='H'
     PCM = pcm(image1, image2)
     n = 5
+    H, W = np.shape(image1)
     peaks = multiPeakMax(PCM,n)
-    peak_list = []
-    for peak in peaks:
-        if peak[0]!=0 or peak[1]!=0:
-            peak_list.append(np.asarray(interpretTranslation(image1, image2, peak[0], peak[1], direction)))
+    peak_list = np.asarray(interpretTranslation(image1, image2, peaks[:,0], peaks[:,1], 0, H, 0, W, n))
     peak_arr = np.asarray(peak_list)
     max_peak = np.argmax(peak_arr[:,0])
     return peak_arr[max_peak,:]
