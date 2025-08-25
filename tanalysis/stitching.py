@@ -119,13 +119,13 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
     for pos in np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]:
         for rowval, colval in pos:
             if (colmin <= colval) and (colval <= colmax) and (rowmin <= rowval) and (rowval <= rowmax):
-                    subI1 = extractOverlapSubregion(image1, rowval, colval)
-                    subI2 = extractOverlapSubregion(image2, -rowval, -colval)
-                    ncc_val = ncc(subI1, subI2)
-                    if ncc_val>_ncc:
-                        _ncc = float(ncc_val)
-                        x = int(rowval)
-                        y = int(colval)
+                subI1 = extractOverlapSubregion(image1, rowval, colval)
+                subI2 = extractOverlapSubregion(image2, -rowval, -colval)
+                ncc_val = ncc(subI1, subI2)
+                if ncc_val>_ncc:
+                    _ncc = float(ncc_val)
+                    x = int(rowval)
+                    y = int(colval)
     return np.asarray([_ncc,x,y])
     
 
@@ -144,8 +144,11 @@ def pciam(image1:np.ndarray, image2:np.ndarray):
     PCM = pcm(image1, image2)
     n = 5
     H, W = np.shape(image1)
+    peak_list = []
     peaks = multiPeakMax(PCM,n)
-    peak_list = np.asarray(interpretTranslation(image1, image2, peaks[:,0], peaks[:,1], 0, H, 0, W, n))
+    for rowin, colin in zip(peaks[0,:], peaks[1,:]):
+        peak_list.append(np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n)))
+    #########################################################################################################################################################################################################
     peak_arr = np.asarray(peak_list)
     max_peak = np.argmax(peak_arr[:,0])
     return peak_arr[max_peak,:]
