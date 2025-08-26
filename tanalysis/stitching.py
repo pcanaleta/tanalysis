@@ -24,13 +24,12 @@ def pcm(image1:np.ndarray, image2:np.ndarray):
     PCM = np.fft.ifft2(FC/np.abs(FC))
     return PCM.real.astype(np.float32)
 
-def multiPeakMax(PCM:np.ndarray, n:int = 2):
+def multiPeakMax(PCM:np.ndarray):
     """
     This function finds the multiple discrete peaks in a pcm matrix
 
     Args:
         PCM (ndArray): 2D array with peak correlation values
-        n (int): number of peaks we want to use. Defaults to 2
 
     Returns:
         tuple: array of n tuples (x,y,val) where x,y correspond to the peak location described in matrix indices
@@ -76,7 +75,7 @@ def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     rowend = int(max(0, min(row+H, H, key=int), key=int))
     return image[rowstart:rowend, colstart:colend]
 
-def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n):
+def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n=5):
     """
     This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, which will correspond to the translation between the two images
 
@@ -97,10 +96,7 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
     H,W = image1.shape
 
     rowmagss = [rowin, H-rowin]
-    rowmagss[1][rowmagss[0]==0]=0
     colmagss = [colin, W-colin]
-    colmagss[1][colmagss[0]==0]=0
-
     _poss = []
     for rowmag in rowmagss:
         for colmag in colmagss:
@@ -109,10 +105,12 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
                     _poss.append([rowmag*rowsign, colmag*colsign])
     poss = np.array(_poss)
     valid_ind = (
-        (rowmin <= poss[:, 0, :])
-        & (poss[:, 0, :] <= rowmax)
-        & (colmin <= poss[:, 1, :])
-        & (poss[:, 1, :] <= colmax)
+        (rowmin < poss[:, 0, :])
+        & (poss[:, 0, :] < rowmax)
+        & (poss[:, 0, :] != 0)
+        & (colmin < poss[:, 1, :])
+        & (poss[:, 1, :] < colmax)
+        & (poss[:, 1, :] != 0)
     )  
     valid_ind = np.any(valid_ind, axis=0)
 
@@ -136,23 +134,17 @@ def pciam(image1:np.ndarray, image2:np.ndarray):
     Args:
         image1 (ndArray): 2D image array
         image2 (ndArray): 2D image array
-        direction (str): indicates the direction of the translation, only values accepted are V for vertical translations or H for horizontal translations
 
     Returns:
         ndArray: tuple containing the peak with the max ncc value (ncc, x, y)
     """
     PCM = pcm(image1, image2)
-    n = 5
     H, W = np.shape(image1)
-    peak_list = []
-    peaks = multiPeakMax(PCM,n)
-    for rowin, colin in zip(peaks[0,:], peaks[1,:]):
-        peak_list.append(np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n)))
-    #########################################################################################################################################################################################################
-    peak_arr = np.asarray(peak_list)
-    max_peak = np.argmax(peak_arr[:,0])
-    return peak_arr[max_peak,:]
+    rowin, colin, _ = multiPeakMax(PCM)
+    max_peak = np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W))
+    return max_peak
 
+#############################################################################Fix this function#########################################################################################
 def translationComputation(imgGrid, final_shape) -> np.ndarray:
     """
     imgGrid = arr[ims] with shape (mosaic_row,mosaic_col) where row and col are extracted from metadata
