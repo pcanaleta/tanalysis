@@ -125,7 +125,6 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
                     x = int(rowval)
                     y = int(colval)
     return np.asarray([_ncc,x,y])
-    
 
 def pciam(image1:np.ndarray, image2:np.ndarray):
     """
