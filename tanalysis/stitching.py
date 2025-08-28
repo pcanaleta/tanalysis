@@ -75,7 +75,7 @@ def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     rowend = int(max(0, min(row+H, H, key=int), key=int))
     return image[rowstart:rowend, colstart:colend]
 
-def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n=5):
+def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n=8):
     """
     This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, which will correspond to the translation between the two images
 
@@ -126,7 +126,7 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
                     y = int(colval)
     return np.asarray([_ncc,x,y])
 
-def pciam(image1:np.ndarray, image2:np.ndarray):
+def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
     """
     This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes the coordinates of the peaks for each peak
 
@@ -140,7 +140,7 @@ def pciam(image1:np.ndarray, image2:np.ndarray):
     PCM = pcm(image1, image2)
     H, W = np.shape(image1)
     rowin, colin, _ = multiPeakMax(PCM)
-    max_peak = np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W))
+    max_peak = np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n))
     return max_peak
 
 #############################################################################Fix this function#########################################################################################
