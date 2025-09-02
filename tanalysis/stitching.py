@@ -1,7 +1,7 @@
-import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from skimage import exposure
 
 
 ### Translation Computation ###
@@ -139,122 +139,78 @@ def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
     """
     PCM = pcm(image1, image2)
     H, W = np.shape(image1)
-    rowin, colin, _ = multiPeakMax(PCM)
+    rowin, colin, val = multiPeakMax(PCM)
     max_peak = np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n))
     return max_peak
 
-#############################################################################Fix this function#########################################################################################
-def translationComputation(imgGrid, final_shape) -> np.ndarray:
+def translationComputation(imgs, positions, n=8) -> np.ndarray:
     """
-    imgGrid = arr[ims] with shape (mosaic_row,mosaic_col) where row and col are extracted from metadata
+    This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image
+
+    Args:
+        imgs (ndArray): array of tiles with shape (t,m,z,x,y)
+        positions (list): list of tuples containing the position of the tiles
     """
-    #change final shape for imgGrid.shape
-    transComp = np.empty((np.shape(imgGrid)))
-    for row in range(0,final_shape[0]):
-        for col in range(0,final_shape[1]):
-            Tv,Th = None
-            im1 = imgGrid[row,col]
-            if row is not final_shape[0]:
-                im2v = imgGrid[row+1,col]
-                Tv = pciam(im1,im2v,True)
-            if col is not final_shape[1]:
-                im2h = imgGrid[row,col+1]
-                Th = pciam(im1,im2h,False)
-            transComp[row,col] = (Tv,Th)
-    return transComp  
+    #Translating the given image array to the format needed to proceed
+    nrow=0
+    ncol=0
+    eq_img = []
+    img = []
+    for timestep in imgs[0]:
+        grid={}
+        eq_grid={}
+        for pos, tile in zip(positions, timestep):
+            #Recorder of number of rows and cols
+            if pos[1]+1>nrow:
+                nrow=pos[1]+1
+            if pos[0]+1>ncol:
+                ncol=pos[0]+1
+            #eq_tile=exposure.equalize_adapthist(tile, clip_limit=0.75) #Sometimes is better to equalize the tiles to find the translation values
+            grid[f'{pos[1]}{pos[0]}']=tile
+            #eq_grid[f'{pos[1]}{pos[0]}']=eq_tile
+        #eq_img.append(eq_grid)
+        img.append(grid)
+    
+    #Finding the peaks for some t and z
+    translations = []
+    for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/10))):
+        grid_ = img[t]
+        for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/4)):
+            Tvcol=[]
+            Throw=[]
+            nccv=-np.inf
+            ncch=-np.inf
+            for row in np.arange(nrow):
+                for col in np.arange(ncol):
+                    im2 = grid_[f'{row}{col}'][z]
+                    H,W = im2.shape
+                    if row!=0:
+                        im = grid_[f'{row-1}{col}'][z]
+                        nccv_, Tvrow_, Tvcol_ = pciam(im, im2, n)
+                        if abs(Tvcol_)<int(W/5):
+                            Tvcol.append(Tvcol_)
+                        if nccv<nccv_:
+                            nccv=nccv_
+                            Tvrow=Tvrow_
+                    if col!=0:
+                        im = grid_[f'{row}{col-1}'][z]
+                        ncch_, Throw_, Thcol_ = pciam(im, im2, n)
+                        if abs(Throw_)<int(H/5):
+                            Throw.append(Throw_)
+                        if ncch<ncch_:
+                            ncch=ncch_
+                            Thcol=Thcol_
+            if Throw==[]:
+                Throw=[0]
+            if Tvcol==[]:
+                Tvcol=[0]
+            Tv = [int(abs(Tvrow)), int(np.average(Tvcol))]
+            Th = [int(np.average(Throw)), int(abs(Thcol))]
+            rr = Th[0]
+            rc = Tv[1]
+            drow = Th[1]-rr
+            dcol = Tv[0]-rc
+            translations.append([drow, rr, dcol, rc])
 
-### Translation Optimization ###
+    return translations
 
-##### Compute Image Overlap #####
-def computeMle(model, T):
-    likelihood = 0 #initialize likelihood
-    for t in T:
-        normLikelihood = np.exp((-(t-model[1])**2/(2*model[2]**2)))/(model[2]*np.sqrt(2*np.pi)) #likelihood that t belongs to N
-        uniformLikelihood = 1/100 #likelihood that t belongs to uniform distribution
-        p = model[0]/100
-        l = p*uniformLikelihood + (1-p)*normLikelihood
-        likelihood = likelihood + np.log(abs(l))
-    return likelihood
-
-def percentileResolutionMleHillClimb(model, T):
-    done = False
-    neighbours = []
-    while not done:
-        for neighbour in neighbours: #neighbours differ from model by distance of 1 in a single dimension
-            temp = model
-    return model
-
-def computeImageOverlap(imgGrid:np.ndarray, T:np.ndarray, direction:str):
-    H,W = imgGrid[0].shape
-    if direction == 'North':
-        T = 100*T/H
-    else:
-        T = 100*T/W
-
-    bestModel = [0,0,0 -np.inf] #model contains [probUniform, mu, sigma, likelihood]
-
-    maxStallCount = 20 #termination condition
-    stallCount = 0
-
-    while stallCount < maxStallCount:
-        model = [100*np.random.rand(), 100*np.random.rand(), 100*np.random.rand(), np.nan]
-        model = percentileResolutionMleHillClimb(model, T)
-
-        if model[3] > bestModel[3]:
-            bestModel = model
-            stallCount = 0
-        else:
-            stallCount = stallCount + 1
-
-    overlap = 100 - bestModel[1]
-    return overlap
-
-##### Compute Stage Repeatability #####
-
-def filterByOverlapAndCorrelation(imgGrid, T, overlap, pou, direction):
-    H,W = imgGrid[0].shape
-
-    if direction == 'North':
-        range = (H-(overlap+pou)*H/100, H-(overlap-pou)*H/100)
-    else:
-        range = (W-(overlap+pou)*W/100, W-(overlap-pou)*W/100)
-
-    validTranslations = []
-    for t in T:
-        if direction == 'North':
-            if t[0][0]:
-                if range[0] <= t[0] <= range[1]:
-                    validTranslations.append(t)
-        else:
-                if range[0] <= t[1] <= range[1]:
-                    validTranslations.append(t)
-
-    return validTranslations
-
-def filterOutliers(T, direction):
-    validTranslations = []
-    w = 1.5
-
-    if direction == 'North':
-        q2 = np.median(T[:,1])
-        q1 = np.median(T[:,1]<q2)
-        q3 = np.median(T[:,1]>q2)
-        iqd = abs(q3-q1)
-
-        for t in T:
-            if (q1-w*iqd) < t[0]:
-                return
-
-def estimateEmptyRowColumn(imgGrid, translations, validTranslations, direction):
-    H,W = imgGrid.shape
-    if direction == "North":
-        for row in range(0,H):
-            return
-
-def computeRepeatability(imgGrid, T, overlap, pou, direction):
-    return
-
-### Image Composition ###
-
-def composeImage(imgGrid, T):
-    return

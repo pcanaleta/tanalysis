@@ -94,11 +94,18 @@ def imread(dirname:str, channel:int=1, tiles:bool=False):
                     im = []
                     if tiles==True:
                         im_info['mosaic_position'] = image_0.info['mosaic_position'] #(col, row, x_pos, y_pos)
+                        counter = 0 #for some reason, readlif changes the position of the tiles each timefrme by m+1, whit this counter, we fix this specific problem in the images used to test the function
                         for t0 in range(0, num_slices):
+                            if counter == 6:
+                                counter = 0
                             num_tiles = image_0.info['dims'].m
                             mosaic = []
                             for m0 in range(0, num_tiles):
-                                mosaic.append([image for image in image_0.get_iter_z(c=channel, t=t0, m=m0)])
+                                mi = m0-counter
+                                if mi<0:
+                                    mi = mi+6
+                                mosaic.append([image for image in image_0.get_iter_z(c=channel, t=t0, m=mi)])
+                            counter = counter+1
                             im.append(np.asarray(mosaic))
                         im_list.append(np.asarray(im))
                     else:
