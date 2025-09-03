@@ -121,7 +121,6 @@ def imread(dirname:str, channel:int=1, tiles:bool=False):
     print('All files read!')
     return im_list, np.max(dim_recorder), im_name, im_info
 
-
 def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, denoisem:bool=False, modelpath:bool=None,):
     '''
     This function segmentates the images with the model selected. The segmented images are saved in the specified directory. 

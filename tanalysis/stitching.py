@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from skimage import exposure
 
-
 ### Translation Computation ###
 def pcm(image1:np.ndarray, image2:np.ndarray):
     """
@@ -143,6 +142,32 @@ def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
     max_peak = np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n))
     return max_peak
 
+def make_grid(im_list, positions):
+    '''
+    This function converts the resulting image list from the imread function to a list of dictionaries where each dictionary corresponds to a timeframe. 
+    The keys in the dictionary correspond to the row/col position of the tile assigned to the key
+
+    Args:
+        im_list (list): list of arrays obtained from imread function
+        positions (tuple): list of tuples obtained from imread function
+    '''
+    nrow=0
+    ncol=0
+    grid_list=[]
+    for im in im_list:
+        img = []
+        for timestep in im:
+            grid={}
+            for pos, tile in zip(positions, timestep):
+                if pos[1]+1>nrow:
+                    nrow=pos[1]+1
+                if pos[0]+1>ncol:
+                    ncol=pos[0]+1
+                grid[f'{pos[1]}{pos[0]}']=tile
+            img.append(grid)
+        grid_list.append(img)
+    return grid_list, nrow, ncol
+
 def translationComputation(imgs, positions, n=8) -> np.ndarray:
     """
     This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image
@@ -152,65 +177,95 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
         positions (list): list of tuples containing the position of the tiles
     """
     #Translating the given image array to the format needed to proceed
-    nrow=0
-    ncol=0
-    eq_img = []
-    img = []
-    for timestep in imgs[0]:
-        grid={}
-        eq_grid={}
-        for pos, tile in zip(positions, timestep):
-            #Recorder of number of rows and cols
-            if pos[1]+1>nrow:
-                nrow=pos[1]+1
-            if pos[0]+1>ncol:
-                ncol=pos[0]+1
-            #eq_tile=exposure.equalize_adapthist(tile, clip_limit=0.75) #Sometimes is better to equalize the tiles to find the translation values
-            grid[f'{pos[1]}{pos[0]}']=tile
-            #eq_grid[f'{pos[1]}{pos[0]}']=eq_tile
-        #eq_img.append(eq_grid)
-        img.append(grid)
+    grid_list, nrow, ncol = make_grid(imgs, positions)
     
     #Finding the peaks for some t and z
-    translations = []
-    for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/10))):
-        grid_ = img[t]
-        for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/4)):
-            Tvcol=[]
-            Throw=[]
-            nccv=-np.inf
-            ncch=-np.inf
-            for row in np.arange(nrow):
-                for col in np.arange(ncol):
-                    im2 = grid_[f'{row}{col}'][z]
-                    H,W = im2.shape
-                    if row!=0:
-                        im = grid_[f'{row-1}{col}'][z]
-                        nccv_, Tvrow_, Tvcol_ = pciam(im, im2, n)
-                        if abs(Tvcol_)<int(W/5):
-                            Tvcol.append(Tvcol_)
-                        if nccv<nccv_:
-                            nccv=nccv_
-                            Tvrow=Tvrow_
-                    if col!=0:
-                        im = grid_[f'{row}{col-1}'][z]
-                        ncch_, Throw_, Thcol_ = pciam(im, im2, n)
-                        if abs(Throw_)<int(H/5):
-                            Throw.append(Throw_)
-                        if ncch<ncch_:
-                            ncch=ncch_
-                            Thcol=Thcol_
-            if Throw==[]:
-                Throw=[0]
-            if Tvcol==[]:
-                Tvcol=[0]
-            Tv = [int(abs(Tvrow)), int(np.average(Tvcol))]
-            Th = [int(np.average(Throw)), int(abs(Thcol))]
-            rr = Th[0]
-            rc = Tv[1]
-            drow = Th[1]-rr
-            dcol = Tv[0]-rc
-            translations.append([drow, rr, dcol, rc])
+    translations_list = []
+    for img in grid_list:
+        translations = []
+        for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/10)), 'Calculating translation vectors'):
+            grid_ = img[t]
+            for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/4)):
+                Tvcol=[]
+                Throw=[]
+                nccv=-np.inf
+                ncch=-np.inf
+                for row in np.arange(nrow):
+                    for col in np.arange(ncol):
+                        im2 = grid_[f'{row}{col}'][z]
+                        H,W = im2.shape
+                        if row!=0:
+                            im = grid_[f'{row-1}{col}'][z]
+                            nccv_, Tvrow_, Tvcol_ = pciam(im, im2, n)
+                            if abs(Tvcol_)<int(W/5):
+                                Tvcol.append(Tvcol_)
+                            if nccv<nccv_ and abs(Tvrow_)>=int(H*0.8):
+                                nccv=nccv_
+                                Tvrow=abs(Tvrow_)
+                        if col!=0:
+                            im = grid_[f'{row}{col-1}'][z]
+                            ncch_, Throw_, Thcol_ = pciam(im, im2, n)
+                            if abs(Throw_)<int(H/5):
+                                Throw.append(Throw_)
+                            if ncch<ncch_ and abs(Thcol_)>=int(W*0.8):
+                                ncch=ncch_
+                                Thcol=abs(Thcol_)
+                if Throw==[]:
+                    Throw=[0]
+                if Tvcol==[]:
+                    Tvcol=[0]
+                Tv = [int(abs(Tvrow)), int(np.average(Tvcol))]
+                Th = [int(np.average(Throw)), int(abs(Thcol))]
+                rr = Th[0]
+                rc = Tv[1]
+                drow = Th[1]-rr
+                dcol = Tv[0]-rc
+                translations.append([drow, rr, dcol, rc])
+        print('All vectors calculated!')
+        arr_translations = np.asarray(translations)
+        drow, rr, dcol, rc = int(np.median(arr_translations[:,0])), int(np.median(arr_translations[:,1])), int(np.median(arr_translations[:,2])), int(np.median(arr_translations[:,3]))
+        translations_list.append([drow, rr, dcol, rc])
+    return translations_list
 
-    return translations
+def image_reconstruction(imgs, positions, n=8):
+    '''
+    
+    '''
+    grid_list, nrow, ncol = make_grid(imgs, positions)
+    translations_list = translationComputation(imgs, positions, n)
 
+    res_img_list = []
+    for trans_set, grid in zip(translations_list, grid_list):
+        abs_translations = {}
+        minr=0
+        minc=0
+        drow, rr, dcol, rc = trans_set
+        for row in np.arange(nrow):
+            for col in np.arange(ncol):
+                abs_translations[f'{row}{col}'] = [int(row*(drow+rr)+col*rr), int(row*rc+col*(dcol+rc))]
+                minr_ = abs_translations[f'{row}{col}'][0]
+                minc_ = abs_translations[f'{row}{col}'][1]
+                if minr_<minr:
+                    minr=minr_
+                if minc_<minc:
+                    minc=minc_
+        H,W = imgs[0].shape[-2], imgs[0].shape[-1]
+        Hmax,Wmax = abs_translations[f'{nrow-1}{ncol-1}']
+        rerr = abs(minr)
+        cerr = abs(minc)
+        t_result = []
+        for grid_t in grid:
+            z_result = []
+            for z in np.arange(imgs[0].shape[-3]):
+                result = np.zeros((Hmax+H+2*rerr, Wmax+W+2*cerr))
+                for trans in abs_translations:
+                    srow = abs_translations[trans][0]+rerr
+                    scol = abs_translations[trans][1]+cerr
+                    erow = srow+H
+                    ecol = scol+W
+                    result[srow:erow,scol:ecol] = result[srow:erow,scol:ecol]+grid_t[trans][z]
+                z_result.append(result)
+            t_result.append(z_result)
+        res_img = np.asarray(t_result)
+        res_img_list.append(res_img)
+    return res_img_list
