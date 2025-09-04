@@ -188,6 +188,8 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
             for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/4)):
                 Tvcol=[]
                 Throw=[]
+                Tvrow=[]
+                Thcol=[]
                 nccv=-np.inf
                 ncch=-np.inf
                 for row in np.arange(nrow):
@@ -197,25 +199,25 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
                         if row!=0:
                             im = grid_[f'{row-1}{col}'][z]
                             nccv_, Tvrow_, Tvcol_ = pciam(im, im2, n)
-                            if abs(Tvcol_)<int(W/5):
+                            if 0.5<nccv_ and abs(Tvrow_)>=int(H*0.8):
                                 Tvcol.append(Tvcol_)
-                            if nccv<nccv_ and abs(Tvrow_)>=int(H*0.8):
-                                nccv=nccv_
-                                Tvrow=abs(Tvrow_)
+                                Tvrow.append(Tvrow_)
                         if col!=0:
                             im = grid_[f'{row}{col-1}'][z]
                             ncch_, Throw_, Thcol_ = pciam(im, im2, n)
-                            if abs(Throw_)<int(H/5):
+                            if 0.5<ncch_ and abs(Thcol_)>=int(W*0.8):
                                 Throw.append(Throw_)
-                            if ncch<ncch_ and abs(Thcol_)>=int(W*0.8):
-                                ncch=ncch_
-                                Thcol=abs(Thcol_)
+                                Thcol.append(Thcol_)
                 if Throw==[]:
                     Throw=[0]
                 if Tvcol==[]:
                     Tvcol=[0]
-                Tv = [int(abs(Tvrow)), int(np.average(Tvcol))]
-                Th = [int(np.average(Throw)), int(abs(Thcol))]
+                if Tvrow==[]:
+                    Tvrow=[0]
+                if Thcol==[]:
+                    Thcol=[0]
+                Tv = [int(np.average(Tvrow)), int(np.average(Tvcol))]
+                Th = [int(np.average(Throw)), int(np.average(Thcol))]
                 rr = Th[0]
                 rc = Tv[1]
                 drow = Th[1]-rr
@@ -225,11 +227,12 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
         arr_translations = np.asarray(translations)
         drow, rr, dcol, rc = int(np.median(arr_translations[:,0])), int(np.median(arr_translations[:,1])), int(np.median(arr_translations[:,2])), int(np.median(arr_translations[:,3]))
         translations_list.append([drow, rr, dcol, rc])
+        print(translations_list)
     return translations_list
 
 def image_reconstruction(imgs, positions, n=8):
     '''
-    
+    This function reconstructs the mosaic image using translation vectors for the tiles. Calculation of this translation vectors
     '''
     grid_list, nrow, ncol = make_grid(imgs, positions)
     translations_list = translationComputation(imgs, positions, n)
@@ -263,7 +266,7 @@ def image_reconstruction(imgs, positions, n=8):
                     scol = abs_translations[trans][1]+cerr
                     erow = srow+H
                     ecol = scol+W
-                    result[srow:erow,scol:ecol] = result[srow:erow,scol:ecol]+grid_t[trans][z]
+                    result[srow:erow,scol:ecol] = grid_t[trans][z]+result[srow:erow,scol:ecol]
                 z_result.append(result)
             t_result.append(z_result)
         res_img = np.asarray(t_result)
