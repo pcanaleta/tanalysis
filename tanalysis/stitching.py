@@ -170,11 +170,15 @@ def make_grid(im_list, positions):
 
 def translationComputation(imgs, positions, n=8) -> np.ndarray:
     """
-    This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image
+    This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image. The function calculates the translation values drow, rr, dcol, rc which correspond to: vertical translation, error in vertical translation,
+    horizontal translation, error in horizontal translation.
 
     Args:
         imgs (ndArray): array of tiles with shape (t,m,z,x,y)
         positions (list): list of tuples containing the position of the tiles
+
+    Returns:
+        translations_list: list of translation values
     """
     #Translating the given image array to the format needed to proceed
     grid_list, nrow, ncol = make_grid(imgs, positions)
@@ -190,8 +194,6 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
                 Throw=[]
                 Tvrow=[]
                 Thcol=[]
-                nccv=-np.inf
-                ncch=-np.inf
                 for row in np.arange(nrow):
                     for col in np.arange(ncol):
                         im2 = grid_[f'{row}{col}'][z]
@@ -230,12 +232,20 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
         print(translations_list)
     return translations_list
 
-def image_reconstruction(imgs, positions, n=8):
+def image_reconstruction(imgs, positions, translations_list):
     '''
-    This function reconstructs the mosaic image using translation vectors for the tiles. Calculation of this translation vectors
+    This function reconstructs the mosaic image using translation vectors for the tiles. To determine the translation vectors, translationComputation function is used. The reconstructed image is formed by overlapping the stitched tiles
+    and averaging the overlapping parts, resulting in a stitched image.
+
+    Args:
+        imgs: list of arrays of the images to stitch
+        positions: position of each image in the resulting image
+        translations_list: list of translations for the images
+
+    Returns:
+        res_img_list: list of resulting images
     '''
     grid_list, nrow, ncol = make_grid(imgs, positions)
-    translations_list = translationComputation(imgs, positions, n)
 
     res_img_list = []
     for trans_set, grid in zip(translations_list, grid_list):
@@ -261,13 +271,19 @@ def image_reconstruction(imgs, positions, n=8):
             z_result = []
             for z in np.arange(imgs[0].shape[-3]):
                 result = np.zeros((Hmax+H+2*rerr, Wmax+W+2*cerr))
+                tiles_list = []
                 for trans in abs_translations:
                     srow = abs_translations[trans][0]+rerr
                     scol = abs_translations[trans][1]+cerr
                     erow = srow+H
                     ecol = scol+W
-                    result[srow:erow,scol:ecol] = grid_t[trans][z]+result[srow:erow,scol:ecol]
-                z_result.append(result)
+                    result[srow:erow,scol:ecol] = grid_t[trans][z]+1
+                    tiles_list.append(result)
+                tiles_arr = np.asarray(tiles_list)
+                div = (tiles_arr!=0).sum(axis=0)
+                div[div==0]=1
+                mean_result = tiles_arr.sum(axis=0)/div
+                z_result.append(mean_result)
             t_result.append(z_result)
         res_img = np.asarray(t_result)
         res_img_list.append(res_img)
