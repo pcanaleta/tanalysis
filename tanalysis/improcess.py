@@ -13,6 +13,7 @@ import tifffile as tiff
 import numpy as np
 import shutil
 from tqdm import tqdm
+import liffile as lif
 
 try:
     from readlif.reader import LifFile
@@ -54,7 +55,6 @@ def imread(dirname:str, channel:int=1, tiles:bool=False):
     '''
     dirname = os.path.abspath(dirname)
     im_list = [] #list of read images
-    dim_recorder = [] #list to control dimensions of the images
     im_name = [] #list of read images' names
     im_info = {}
 
@@ -72,48 +72,37 @@ def imread(dirname:str, channel:int=1, tiles:bool=False):
         raise ValueError('ERROR: no directory or file submitted')
     
     #Read all files in file_list
+    i=0
     for file in tqdm(file_list, 'Reading submitted files', ncols=100):
         ext = os.path.splitext(file)[-1].lower()
         file_name = os.path.split(file)[-1].replace(ext, "")
+        im_name.append(f'{file_name.replace(ext, '')}-{i}')
+        i=i+1
         #For tiff files
         if ext==".tif" or ext==".tiff":
             image = np.asarray(tiff.imread(file))
-            dim_recorder = (len(np.shape(image)))
             im_list.append(image)
-            im_name.append(file_name)
         #For lif files
         elif ext==".lif":
             if not READLIF:
                 raise ImportError('ERROR: cannot import liffile, please use: pip install -U readlif[all]')
             else:
+                for i in range(0,10):
+                    try:
+                        im = lif.imread(file, image=i)
+                        im_list.append(im)
+                    except:
+                        continue
                 lif_file = LifFile(file)
-                i=0
                 for image_0 in lif_file.get_iter_image():
-                    num_slices = image_0.info['dims'].t
-                    im_info['scale'] = image_0.info['scale'] #(pixels/micron, pixels/micron, pixels/micron, frames/sec)
-                    im = []
+                    im_info['scale'] = image_0.info['scale']
                     if tiles==True:
-                        im_info['mosaic_position'] = image_0.info['mosaic_position'] #(col, row, x_pos, y_pos)
-                        for t0 in range(0, num_slices):
-                            num_tiles = image_0.info['dims'].m
-                            mosaic = []
-                            for m0 in range(0, num_tiles):
-                                mosaic.append([image for image in image_0.get_iter_z(c=channel, t=t0, m=m0)])
-                            im.append(np.asarray(mosaic))
-                        im_list.append(np.asarray(im))
-                    else:
-                        for t0 in range(0, num_slices):
-                            im.append([image for image in image_0.get_iter_z(c=channel, t=t0,)])
-                        im_list.append(np.asarray(im))
-                    im_name.append(f'{file_name.replace(ext, '')}-{i}')
-                    dim_recorder.append(len(np.shape(im)))
-                    i=i+1
+                        im_info['mosaic_position'] = image_0.info['mosaic_position']
         else:
             raise ValueError('ERROR: submited file does not have a supported extension (.tif, .tiff, .lif)')
 
     print('All files read!')
-    return im_list, np.max(dim_recorder), im_name, im_info
-
+    return im_list, im_name, im_info
 
 def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, denoisem:bool=False, modelpath:bool=None,):
     '''
