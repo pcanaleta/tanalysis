@@ -267,12 +267,12 @@ def image_reconstruction(imgs, positions, translations_list):
         rerr = abs(minr)
         cerr = abs(minc)
         t_result = []
-        for grid_t in grid:
+        for grid_t in tqdm(grid, 'Reconstructing timeframes'):
             z_result = []
             for z in np.arange(imgs[0].shape[-3]):
-                result = np.zeros((Hmax+H+2*rerr, Wmax+W+2*cerr))
                 tiles_list = []
                 for trans in abs_translations:
+                    result = np.zeros((Hmax+H+2*rerr, Wmax+W+2*cerr))
                     srow = abs_translations[trans][0]+rerr
                     scol = abs_translations[trans][1]+cerr
                     erow = srow+H
