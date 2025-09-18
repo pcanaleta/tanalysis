@@ -187,7 +187,7 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
     translations_list = []
     for img in grid_list:
         translations = []
-        for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/10)), 'Calculating translation vectors'):
+        for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/8)), 'Calculating translation vectors'):
             grid_ = img[t]
             for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/4)):
                 Tvcol=[]
@@ -201,13 +201,13 @@ def translationComputation(imgs, positions, n=8) -> np.ndarray:
                         if row!=0:
                             im = grid_[f'{row-1}{col}'][z]
                             nccv_, Tvrow_, Tvcol_ = pciam(im, im2, n)
-                            if 0.5<nccv_ and abs(Tvrow_)>=int(H*0.8):
+                            if 0.3<nccv_ and abs(Tvrow_)>=int(H*0.8):
                                 Tvcol.append(Tvcol_)
                                 Tvrow.append(Tvrow_)
                         if col!=0:
                             im = grid_[f'{row}{col-1}'][z]
                             ncch_, Throw_, Thcol_ = pciam(im, im2, n)
-                            if 0.5<ncch_ and abs(Thcol_)>=int(W*0.8):
+                            if 0.3<ncch_ and abs(Thcol_)>=int(W*0.8):
                                 Throw.append(Throw_)
                                 Thcol.append(Thcol_)
                 if Throw==[]:
