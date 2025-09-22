@@ -169,7 +169,7 @@ def make_grid(im_list, positions):
         grid_list.append(img)
     return grid_list, nrow, ncol
 
-def translationComputation(imgs, positions, n=8) -> cp.ndarray:
+def translationComputation(imgs, positions, n=8, n_frames=20) -> cp.ndarray:
     """
     This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image. The function calculates the translation values drow, rr, dcol, rc which correspond to: vertical translation, error in vertical translation,
     horizontal translation, error in horizontal translation.
@@ -188,9 +188,11 @@ def translationComputation(imgs, positions, n=8) -> cp.ndarray:
     translations_list = []
     for img in grid_list:
         translations = []
-        for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/8)), 'Calculating translation vectors'):
+        if n_frames>len(imgs[0]):
+            print(f'The number of frames selected is bigger than the frames in the image. Using {len(imgs[0])} frames instead')
+        for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/n_frames)), 'Calculating translation vectors'):
             grid_ = img[t]
-            for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/4)):
+            for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/5)):
                 Tvcol=[]
                 Throw=[]
                 Tvrow=[]
@@ -228,7 +230,8 @@ def translationComputation(imgs, positions, n=8) -> cp.ndarray:
                 translations.append([drow, rr, dcol, rc])
         print('All vectors calculated!')
         arr_translations = cp.asarray(translations)
-        drow, rr, dcol, rc = int(cp.median(arr_translations[:,0])), int(cp.median(arr_translations[:,1])), int(cp.median(arr_translations[:,2])), int(cp.median(arr_translations[:,3]))
+        #We should not take in consideration when values are 0
+        drow, rr, dcol, rc = int(cp.median(arr_translations[cp.nonzero(arr_translations[:,0]),0])), int(cp.median(arr_translations[cp.nonzero(arr_translations[:,1]),1])), int(cp.median(arr_translations[cp.nonzero(arr_translations[:,2]),2])), int(cp.median(arr_translations[cp.nonzero(arr_translations[:,3]),3]))
         translations_list.append([drow, rr, dcol, rc])
         print(translations_list)
     del grid_list
