@@ -273,7 +273,7 @@ def image_reconstruction(imgs, positions, translations_list):
         cerr = abs(minc)
         nH,nW = Hmax+H+2*rerr, Wmax+W+2*cerr
         ntiles = len(abs_translations)
-        res_img = cp.empty((imgs[0].shape[0], imgs[0].shape[-3], nH, nW), dtype=cp.uint16)
+        res_img = cp.empty((imgs[0].shape[0], imgs[0].shape[-3], nH, nW), dtype=cp.uint8)
         t=0
         for grid_t in tqdm(grid, 'Reconstructing timeframes'):
             for z in cp.arange(imgs[0].shape[-3]):
@@ -289,7 +289,7 @@ def image_reconstruction(imgs, positions, translations_list):
                 div = (tiles!=0).sum(axis=0)
                 div[div==0]=1
                 mean_result = tiles.sum(axis=0)/div
-                res_img[t,z] = mean_result
+                res_img[t,z] = mean_result/cp.max(mean_result)*255
             t+=1
         res_img_list.append(res_img)
         del res_img
