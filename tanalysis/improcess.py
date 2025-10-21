@@ -112,7 +112,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     print('All files read!')
     return im_list, im_name, im_info
 
-def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, denoisem:bool=False, modelpath:bool=None,):
+def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:bool=None,):
     '''
     This function segmentates the images with the model selected. The segmented images are saved in the specified directory. 
     
@@ -120,10 +120,8 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
         images (list): list of images in array format
         dim (int): number of dimensions of the images
         im_name (list): list of lists of image names
-        modelpath (string): path to pretained model 
         savedir (string): path to directory where images will be saved
-        time_frames (bool): indicates if images are already separated by time frames or not. Defaults to False
-        folders (bool): if True, each set of image time frames are saved in a specific folder contained in the specified directory. Defaults to False. Recommended to activate if segmenting more than one image at the same time
+        modelpath (string): path to pretained model 
 
     Returns:
         list: List of directories where images are saved
@@ -137,16 +135,10 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
     
     io.logger_setup()
 
-    model = models.CellposeModel(gpu=True, model_type='nuclei')
+    model = models.CellposeModel(gpu=True)
 
     if modelpath!=None:
         model = models.CellposeModel(gpu=True, pretrained_model=modelpath)
-
-    elif denoisem==True:
-        model = denoise.CellposeDenoiseModel(gpu=True, model_type="nuclei", 
-                                             restore_type="denoise_nuclei")
-        
-    channels = [[0,0]]
 
     if dim == 3:
         do_3D = True
@@ -162,13 +154,10 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
             os.makedirs(temp_savedir)
             print(temp_savedir)
         for time_frame in image:
-            if denoise==True:
-                masks, flows, styles, imgs_dn = model.eval(time_frame, do_3D=do_3D, diameter=12.0, channels=channels, min_size=35)
-            else:
-                masks, flows, styles = model.eval(time_frame, do_3D=do_3D, diameter=12.0, channels=channels, min_size=35)
+            masks, flows, styles = model.eval(time_frame, do_3D=do_3D, z_axis=0)
             io.save_masks(time_frame, masks, flows, f'{name}_T{timer}.tif', tif=do_3D, png=not(do_3D), savedir=temp_savedir)
             timer=timer+1 
-    return 
+    return temp_savedir
 
 def concatenate(dirname, remove_original=False):
     '''
