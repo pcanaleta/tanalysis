@@ -19,6 +19,7 @@ def pcm(image1:np.ndarray, image2:np.ndarray):
     F2 = np.fft.fft2(image2)
     FC = F1 * np.conjugate(F2)
     PCM = np.fft.ifft2(FC/np.abs(FC))
+    del FC,F1,F2
     return PCM.real.astype(np.float32)
 
 def multiPeakMax(PCM:np.ndarray):
@@ -51,6 +52,7 @@ def ncc(image1:np.ndarray, image2:np.ndarray):
     I2 = image2.flatten()
     n = np.dot(I1 - np.mean(I1), I2 - np.mean(I2))
     d = np.linalg.norm(I1 - np.mean(I1)) * np.linalg.norm(I2 - np.mean(I2))
+    del I1,I2
     return n/d
 
 def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
@@ -121,6 +123,7 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
                     _ncc = float(ncc_val)
                     x = int(rowval)
                     y = int(colval)
+    del subI1, subI2
     return np.asarray([_ncc,x,y])
 
 def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
@@ -136,7 +139,7 @@ def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
     """
     PCM = pcm(image1, image2)
     H, W = np.shape(image1)
-    rowin, colin, val = multiPeakMax(PCM)
+    rowin, colin, _ = multiPeakMax(PCM)
     max_peak = np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n))
     return max_peak
 
@@ -270,7 +273,7 @@ def image_reconstruction(imgs, positions, translations_list):
         cerr = abs(minc)
         nH,nW = Hmax+H+2*rerr, Wmax+W+2*cerr
         ntiles = len(abs_translations)
-        res_img = np.empty((imgs[0].shape[0], imgs[0].shape[-3], nH, nW), dtype=np.uint16)
+        res_img = np.empty((imgs[0].shape[0], imgs[0].shape[-3], nH, nW), dtype=np.uint8)
         t=0
         for grid_t in tqdm(grid, 'Reconstructing timeframes'):
             for z in np.arange(imgs[0].shape[-3]):
@@ -286,7 +289,7 @@ def image_reconstruction(imgs, positions, translations_list):
                 div = (tiles!=0).sum(axis=0)
                 div[div==0]=1
                 mean_result = tiles.sum(axis=0)/div
-                res_img[t,z] = mean_result
+                res_img[t,z] = mean_result/np.max(mean_result)*255
             t+=1
         res_img_list.append(res_img)
         del res_img

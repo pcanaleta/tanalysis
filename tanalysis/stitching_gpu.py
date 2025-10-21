@@ -291,6 +291,6 @@ def image_reconstruction(imgs, positions, translations_list):
                 mean_result = tiles.sum(axis=0)/div
                 res_img[t,z] = mean_result/cp.max(mean_result)*255
             t+=1
-        res_img_list.append(res_img)
+        res_img_list.append(cp.asnumpy(res_img))
         del res_img
     return res_img_list
