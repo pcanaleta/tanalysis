@@ -6,10 +6,6 @@ from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
 
-#TODO: 
-    #limit tlags to min dt and max len(track)*dt
-    #check all functions except msd
-
 def xml_to_xlsx(dirname, xyscale, zdist, dt):
     '''
     This function converts all xml files contained in a folder into a merged excel file with all data. One file is created for each condition
@@ -30,11 +26,7 @@ def xml_to_xlsx(dirname, xyscale, zdist, dt):
         dirname (string): path to the folder containing the folders where xml files are saved
         dt (int): time step between frames
         xyscale (float): conversion rate from pixels to real units
-        zdist (floar): real distance between z planes
-
-    TODO:
-        xyscale and zdist should be obtaind from the image metadata
-        
+        zdist (floar): real distance between z planes        
     '''
     i = 0
     xlsxdata = []

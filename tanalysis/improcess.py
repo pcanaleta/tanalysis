@@ -69,7 +69,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     
     #Read all files in file_list
     i=0
-    for file in tqdm(file_list, 'Reading submitted files', ncols=100):
+    for file in file_list:
         ext = os.path.splitext(file)[-1].lower()
         file_name = os.path.split(file)[-1].replace(ext, "")
         im_name.append(f'{file_name.replace(ext, '')}-{i}')
@@ -109,7 +109,6 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
         else:
             raise ValueError('ERROR: submited file does not have a supported extension (.tif, .tiff, .lif)')
 
-    print('All files read!')
     return im_list, im_name, im_info
 
 def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:bool=None,):
@@ -171,7 +170,7 @@ def concatenate(dirname, remove_original=False):
         ValueError: if path given is not a folder
     '''
     if os.path.isdir(dirname):
-        images, dim, names = imread(dirname)
+        images, names, info = imread(dirname)
         newname = f'{os.path.abspath(os.path.join(dirname,names[0].replace('_T0_cp_masks','')))}.tiff'
         im_concat = np.stack(images, 0)
         
@@ -182,10 +181,7 @@ def concatenate(dirname, remove_original=False):
             except Exception as e:
                 print('Failed to delete %s. Reason: %s' % (dirname, e))
         
-        if dim == 3:
-            axes = 'TZYX'
-        elif dim == 2:
-            axes = 'TYX'
+        axes = 'TZYX'
         
         tiff.imwrite(
             newname, 
