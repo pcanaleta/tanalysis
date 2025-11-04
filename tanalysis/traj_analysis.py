@@ -116,7 +116,7 @@ def get_traj(dirname):
 
     return file_tracks, file_names
 
-def velocity(dirname, dt, save_xlsx=True, savedir=None):
+def velocity(dirname, dt, timelapse_units, save_xlsx=True, savedir=None):
     '''
     This function is used to calculate the velocity of the cells. It performs the mean between the velocities of all tracks and generates a file containing the velocity for each time frame.
 
@@ -145,28 +145,55 @@ def velocity(dirname, dt, save_xlsx=True, savedir=None):
     name = 0
     for file in all_files:
         file_velocity = []
+        file_vels = []
         time = np.linspace(1, len(file[0])-1, len(file[0])-1)
         #calculate velocity for each track in the file
+        track_count=0
+        means = np.zeros((len(file), 5))
+        std = np.zeros((len(file), 5))
+        median = np.zeros((len(file), 5))
+        max = np.zeros((len(file), 5))
+        min = np.zeros((len(file), 5))
         for track in file:
             xyz = track[:,2:]
             dxyz = np.diff(xyz, axis=0)
-            vxyz = np.abs(dxyz/dt)
+            vxyz = (dxyz/dt)
+            absvxyz = abs(vxyz)
             vr = np.sqrt(vxyz[:,0]**2+vxyz[:,1]**2+vxyz[:,2]**2)
             v = np.array([vr, vxyz[:,0], vxyz[:,1], vxyz[:,2]])
-            file_velocity.append(np.transpose(v))
+            absv = np.array([vr, absvxyz[:,0], absvxyz[:,1], absvxyz[:,2]])
+            #Determine parameters of interest
+            track_id = track[0,0]
+            means[track_count,:] = np.array([int(track_id), *np.mean(absv, axis=-1)])
+            std[track_count,:] = np.array([int(track_id), *np.std(absv, axis=-1)])
+            median[track_count,:] = np.array([int(track_id), *np.median(absv, axis=-1)])
+            max[track_count,:] = np.array([int(track_id), *np.max(absv, axis=-1)])
+            min[track_count,:] = np.array([int(track_id), *np.min(absv, axis=-1)])
 
-        mean_velocity = np.zeros((np.shape(np.transpose(v))))
-        for k in range(0,np.shape(v)[1]):
-            mv = []
-            for track in file_velocity:
-                mv.append(track[k,:])
-            mean_velocity[k,:] = np.median(mv, axis=0)
+            file_velocity.append(np.transpose(v))
+            vels = np.array([track[1:,0], time, vr, vxyz[:,0], vxyz[:,1], vxyz[:,2]])
+            file_vels.append(np.transpose(vels))
+            track_count+=1
+
+        all_vels = np.asarray(file_vels)
+        velocities = np.reshape(all_vels, (all_vels.shape[0]*all_vels.shape[1], 6))
     
         #save velocity into excel files, if multiple files have been readed, multiple excel files will be created
         if save_xlsx==True:
             savename = f'{os.path.join(savedir,name_list[name])}_velocity.xlsx'
-            df = DataFrame({'time': time*dt, 'r_velocity': abs(mean_velocity[:,0]), 'x_velocity': abs(mean_velocity[:,1]), 'y_velocity': abs(mean_velocity[:,2]), 'z_velocity': abs(mean_velocity[:,3])})
-            df.to_excel(savename, sheet_name='velocity', index=False)
+            df1 = DataFrame({'track_id': velocities[:,0], f'dt ({timelapse_units})': velocities[:,1]*dt, 'r_velocity': velocities[:,2], 'x_velocity': velocities[:,3], 'y_velocity': velocities[:,4], 'z_velocity': velocities[:,5]})
+            df2 = DataFrame({'track_id': np.int8(means[:,0]), 'r_velocity': np.double(means[:,1]), 'x_velocity': np.double(means[:,2]), 'y_velocity': np.double(means[:,3]), 'z_velocity': np.double(means[:,4])})
+            df3 = DataFrame({'track_id': np.int8(median[:,0]), 'r_velocity': np.double(median[:,1]), 'x_velocity': np.double(median[:,2]), 'y_velocity': np.double(median[:,3]), 'z_velocity': np.double(median[:,4])})
+            df4 = DataFrame({'track_id': np.int8(std[:,0]), 'r_velocity': np.double(std[:,1]), 'x_velocity': np.double(std[:,2]), 'y_velocity': np.double(std[:,3]), 'z_velocity': np.double(std[:,4])})
+            df5 = DataFrame({'track_id': np.int8(max[:,0]), 'r_velocity': np.double(max[:,1]), 'x_velocity': np.double(max[:,2]), 'y_velocity': np.double(max[:,3]), 'z_velocity': np.double(max[:,4])})
+            df6 = DataFrame({'track_id': np.int8(min[:,0]), 'r_velocity': np.double(min[:,1]), 'x_velocity': np.double(min[:,2]), 'y_velocity': np.double(min[:,3]), 'z_velocity': np.double(min[:,4])})
+            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+                df1.to_excel(writer, sheet_name='track_velocity', index=False)
+                df2.to_excel(writer, sheet_name='track_mean', index=False)
+                df3.to_excel(writer, sheet_name='track_median', index=False)
+                df4.to_excel(writer, sheet_name='track_std', index=False)
+                df5.to_excel(writer, sheet_name='track_max', index=False)
+                df6.to_excel(writer, sheet_name='track_min', index=False)
             name = name+1
     return
 
