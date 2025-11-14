@@ -3,10 +3,12 @@ import pandas as pd
 from pandas import DataFrame
 import os
 from scipy.optimize import curve_fit
+from scipy.stats import linregress
+from scipy.spatial import ConvexHull
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
 
-def xml_to_xlsx(dirname, xyscale, zdist, dt):
+def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     '''
     This function converts all xml files contained in a folder into a merged excel file with all data. One file is created for each condition
     directory tree should be something like:
@@ -24,9 +26,9 @@ def xml_to_xlsx(dirname, xyscale, zdist, dt):
 
     Args:
         dirname (string): path to the folder containing the folders where xml files are saved
-        dt (int): time step between frames
         xyscale (float): conversion rate from pixels to real units
-        zdist (floar): real distance between z planes        
+        zdist (floar): real distance between z planes   
+        dt (int): time step between frames
     '''
     i = 0
     xlsxdata = []
@@ -57,93 +59,123 @@ def xml_to_xlsx(dirname, xyscale, zdist, dt):
     df.to_excel(savename, sheet_name='trajectories', index=False)  
     return
 
-def get_traj(dirname):
+def get_traj(dirname:str) -> list:
     '''
-    This function gets all the tracks in an excel file and creates an array containing every track.
+    This function gets the tracks in an excel file and crops them in order to have all tracks with the same length as the shortest track.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
         dirname (string): path to the folder containing the Excel files
 
     Returns.
-        list: list of track arrays    
+        list: list of track arrays
+        list: list of file names  
     '''
-    #read files in dirname and return the dataframe as a numpy array
-    #a list of numpy arrays is created, with one array element per file
-    file_list = []
-    file_names = []
-    if os.path.isdir(dirname):
-        for fname in os.listdir(dirname):
-            ext = os.path.splitext(fname)[-1].lower()
-            if ext=='.xlsx' or ext=='.xls':
-                file_names.append(fname.replace(ext,''))
-                df = pd.read_excel(os.path.join(dirname,fname))
-                np_df = df.to_numpy()
-                file_list.append(np_df)
-    elif os.path.isfile(dirname):
-        ext = os.path.splitext(dirname)[-1].lower()
-        if ext=='.xlsx' or ext=='.xls':
-            file_names.append(os.path.split(dirname)[-1].replace(ext,''))
-            df = pd.read_excel(os.path.abspath(dirname))
-            np_df = df.to_numpy()
-            file_list.append(np_df)
+    tracks = []
+    names = []
+    for fname in os.listdir(dirname):
+        try:
+            ext=os.path.splitext(fname)[-1].lower()
+            df=pd.read_excel(os.path.join(dirname,fname))
+            np_df=df.to_numpy()
+            names.append(fname.replace(ext,''))
+            tracks.append(np_df)
+        except:
+            if os.path.isdir(os.path.join(dirname,fname)):
+                continue
+            else:
+                print(f'Could not read: {os.path.join(dirname,fname)}')
+    return tracks, names
 
-    #get the trajectories of the given files, with the length of all trajectories being the minimum of the dataset
-    file_tracks = []
-    for file in file_list:
-        all_tracks = []
-        all_tracks_len = []
-        ids = np.unique(file[:,0]) #get tracks id from the dataset
+def filter_traj(dirname:str, filter_values:dict) -> list:
+    '''
+    This function applys selected filters to the original tracks.
 
-        #separate tracks in different 2D arrays
+    Args:
+        dirname (str): path to the original tracks
+        filter_values (dict): dict containing the filter values. Possible filter parameters are: ['track_duration', 'total_distance', 'mean_velocity', 'minmax_velocity']. Filter values are composed of a min and a max value.
+    '''
+    unfiltered_tracks, names = get_traj(dirname)
+    tracks = []
+    for file in unfiltered_tracks:
+        ids,index = np.unique(file[:,0], return_index=True)
+        valid_tracks = []
+        for track_id in ids:
+            try:
+                track = file[index[int(track_id)]:index[int(track_id)+1]]
+            except:
+                track = file[index[int(track_id)]:]
+            #Track parameters
+            track_duration = track[-1,1]-track[0,1]
+            total_distance = abs(np.linalg.norm(track[-1,2:])-np.linalg.norm(track[0,2:]))
+            track_velocity = np.linalg.norm(np.diff(track[:,2:], axis=0),axis=-1)/track[1,1]
+            mean_velocity = np.mean(track_velocity, axis=-1)
+            max_velocity = np.max(track_velocity)
+            min_velocity = np.min(track_velocity)
+            comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], filter_values['total_distance'][0]<=total_distance<=filter_values['total_distance'][1], filter_values['mean_velocity'][0]<=mean_velocity<=filter_values['mean_velocity'][1], filter_values['minmax_velocity'][1]>=max_velocity, filter_values['minmax_velocity'][0]<=min_velocity]
+            if all(comparison):
+                for timestamp in np.arange(len(track)):
+                    valid_tracks.append(track[timestamp,:])
+            else:
+                continue
+        tracks.append(np.asarray(valid_tracks))
+    return tracks, names
+
+def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict=None):
+    '''
+    This function reads the tracks in the given excel files and crops them in order to all have the same length.
+
+    Args:
+        dirname (str): path to the folder containing the excel files
+        filter_tracks (bool): whether to perform track filtering or not. Defaults to False
+        filter_values (dict): dict containing the filter values in case of performing the filter. Defaults to None
+
+    Returns:
+        list: list of arrays containing the cropped tracks, all arrays will have the same length
+        list: list of names of the excel files
+    '''
+    if filter_tracks==True:
+        tracks, names = filter_traj(dirname, filter_values=filter_values)
+    else:
+        tracks, names = get_traj(dirname)
+
+    crop_tracks = []
+    for file in tracks:
+        ids = np.unique(file[:,0], return_index=False)
+        min_len = np.inf
+        track_list = []
+        crop_track = []
         for track_id in ids:
             track = []
-            for i in range(0, len(file[:,0])):
-                if file[i,0]==track_id:
-                    track.append(file[i,:])
-            track = np.array(track)
-            track_len = len(track)
-            all_tracks_len.append(track_len) #collecting the length of al tracks
-            all_tracks.append(track)
+            for j in range(0,len(file)):
+                if file[j,0]==track_id:
+                    track.append(file[j,:])
+            if len(track)<min_len:
+                min_len=len(track)
+            track_list.append(np.asarray(track))
+        for traj in track_list:
+            crop_track.append(traj[:min_len,:])
+        crop_tracks.append(np.asarray(crop_track))
+    tracks = crop_tracks
+    return tracks, names
 
-        #making all trajectories have the same length, being that length the minimum one
-        min_len = min(all_tracks_len)
-        cropped_tracks = []
-        for track in all_tracks:
-            cropped_tracks.append(track[:min_len])
-        c_tracks = np.array(cropped_tracks)        
-        file_tracks.append(c_tracks)
-
-    return file_tracks, file_names
-
-def velocity(dirname, dt, timelapse_units, save_xlsx=True, savedir=None):
+def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
     '''
     This function is used to calculate the velocity of the cells. It performs the mean between the velocities of all tracks and generates a file containing the velocity for each time frame.
 
     Args:
-        dirname (string): path to the folder containing the Excel files
-        dt (int): trajectory time step size
-        save_xlsx (bool): Defults to True. Determines if an Excel file with the results of the function will be saved.
-        savedir (string): Defaults to None. Path to the folder where results will be saved. If set to None, a folder will be created in the directory containing the tracks.
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
 
     Returns:
-        list: list of arrays where each array corresponds to the mean velocities of a  given file.
-
-    TODO:
-        could be interesting to save velocity for each track to perform metrics like in CellTracksColab
-    '''
-    all_files, name_list = get_traj(dirname)
-
-    if os.path.isfile(dirname):
-        raise ValueError('Error: please indicate the path to the folder where results will be saved.')
-
-    if savedir==None:
-        if not os.path.exists(os.path.abspath(fr'{dirname}\Results')):
-            os.makedirs(os.path.abspath(fr'{dirname}\Results'))
-        savedir = os.path.abspath(fr'{dirname}\Results')
-    
+        list: list of mean speeds of the tracks
+    '''    
     name = 0
-    for file in all_files:
+    speed_means = []
+    for file in tracks:
         file_velocity = []
         file_vels = []
         time = np.linspace(1, len(file[0])-1, len(file[0])-1)
@@ -157,7 +189,8 @@ def velocity(dirname, dt, timelapse_units, save_xlsx=True, savedir=None):
         for track in file:
             xyz = track[:,2:]
             dxyz = np.diff(xyz, axis=0)
-            vxyz = (dxyz/dt)
+            dt = np.diff(track[:,1], axis=0)
+            vxyz = np.transpose(np.transpose(dxyz)/(dt))
             absvxyz = abs(vxyz)
             vr = np.sqrt(vxyz[:,0]**2+vxyz[:,1]**2+vxyz[:,2]**2)
             v = np.array([vr, vxyz[:,0], vxyz[:,1], vxyz[:,2]])
@@ -177,10 +210,10 @@ def velocity(dirname, dt, timelapse_units, save_xlsx=True, savedir=None):
 
         all_vels = np.asarray(file_vels)
         velocities = np.reshape(all_vels, (all_vels.shape[0]*all_vels.shape[1], 6))
-    
+        speed_means.append(means)
         #save velocity into excel files, if multiple files have been readed, multiple excel files will be created
-        if save_xlsx==True:
-            savename = f'{os.path.join(savedir,name_list[name])}_velocity.xlsx'
+        if save_results:
+            savename = f'{os.path.join(savedir,names[name])}_velocity.xlsx'
             df1 = DataFrame({'track_id': velocities[:,0], f'dt ({timelapse_units})': velocities[:,1]*dt, 'r_velocity': velocities[:,2], 'x_velocity': velocities[:,3], 'y_velocity': velocities[:,4], 'z_velocity': velocities[:,5]})
             df2 = DataFrame({'track_id': np.int8(means[:,0]), 'r_velocity': np.double(means[:,1]), 'x_velocity': np.double(means[:,2]), 'y_velocity': np.double(means[:,3]), 'z_velocity': np.double(means[:,4])})
             df3 = DataFrame({'track_id': np.int8(median[:,0]), 'r_velocity': np.double(median[:,1]), 'x_velocity': np.double(median[:,2]), 'y_velocity': np.double(median[:,3]), 'z_velocity': np.double(median[:,4])})
@@ -195,9 +228,9 @@ def velocity(dirname, dt, timelapse_units, save_xlsx=True, savedir=None):
                 df5.to_excel(writer, sheet_name='track_max', index=False)
                 df6.to_excel(writer, sheet_name='track_min', index=False)
             name = name+1
-    return
+    return speed_means
 
-def ezmsd(xyz):
+def ezmsd_old(xyz:np.ndarray) -> np.ndarray:
     '''
     This function calculates the msd for the given trajectory. It can accept 1D trajectories or multiple dimension ones.
 
@@ -211,7 +244,7 @@ def ezmsd(xyz):
     fn = s[0]
     msdr = np.zeros(fn-1)
     if len(s)!=1:
-        for tlag in range(1, fn):
+        for tlag in range(1,fn):
             dxyz = xyz[tlag:,:] - xyz[:-tlag,:]
             msdr[tlag-1] = np.mean(np.sum(dxyz**2, axis=1))
     else:
@@ -220,114 +253,273 @@ def ezmsd(xyz):
             msdr[tlag-1] = np.mean(dxyz**2)
     return msdr
 
-def get_msd(dirname, dt, save_xlsx=True, savedir=None, show_fig=False):
+def ezmsd(txyz:np.ndarray) -> np.ndarray:
     '''
-    
+    This function calculates the msd for the given trajectory. It can accept 1D trajectories or multiple dimension ones.
+
+    Args:
+        txyz (array): trajectories used to calculate msd, they are ordered as [t,x,y,z]
+
+    Returns:
+        msdr (array): calculated msd for given trajectory
+    '''
+    s = np.shape(txyz)
+    fn = s[0]
+    msdr = np.zeros((fn-1,3)) #[tlag, sum, n_values]
+    msdr[:,2] = 1
+    track_msd = np.zeros((fn-1,2))
+    if len(s)!=1:
+        for tlag in range(1,fn):
+            dtxyz = txyz[tlag:,:] - txyz[:-tlag,:]
+            for elem in dtxyz:
+                tlag = int(elem[0])
+                try:
+                    msdr[tlag-1,0] = tlag
+                    msdr[tlag-1,1] += np.sum(elem[1:]**2)
+                    msdr[tlag-1,2] += 1
+                except:
+                    #timelag too big
+                    continue
+            track_msd[:,0] = msdr[:,0]
+            track_msd[:,1] = msdr[:,1]/msdr[:,2]
+    else:
+        for tlag in range(1,fn):
+            dtxyz = txyz[tlag:,:] - txyz[:-tlag,:]
+            for elem in dtxyz:
+                tlag = int(elem[0])
+                msdr[tlag-1,0] = tlag
+                msdr[tlag-1,1] += elem[1]
+                msdr[tlag-1,2] += 1
+            track_msd[:,0] = np.int(msdr[:,0])
+            track_msd[:,1] = msdr[:,1]/msdr[:,2]
+    return track_msd
+
+def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+    '''
     This function determines the msd for each file in the directory, with the corresponding error.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        dirname (string): path to the folder containing the Excel files.
-        dt (int): trajectory time step size
-        save_xlsx (bool): Defults to True. Determines if an Excel file with the results of the function will be saved.
-        savedir (string): Defaults to None. Path to the folder where results will be saved. If set to None, a folder will be created in the directory containing the tracks.
-        show_fig (bool): Defaults to False. It is used to work directly with tracks and not loading an exel. Tracks and names should be input in respective params.
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
 
     Returns:
-        list: list of mean msd arrays, one array per file in the directory. Mean msd arrays columns correspond to [time lag, mean msd, error msd].
-
-    TODO:
-        determine cumulated error from msd calculation in every track and mean calculation.    
-    '''
-    all_files, name_list = get_traj(dirname)
-    
-    if savedir==None:
-        if os.path.isfile(dirname):
-            raise ValueError('Error: please indicate the path to the folder where results will be saved.')
-        if not os.path.exists(os.path.abspath(fr'{dirname}\Results')):
-            os.makedirs(os.path.abspath(fr'{dirname}\Results'))
-        savedir = os.path.abspath(fr'{dirname}\Results')
-
-    all_files_msd = []
-    all_files_mean_msd = []
+        final_msd: list of msd of all valid tracks
+        final_mean_msd: list of mean msd for each condition analyzed
+    ''' 
+    #Make all files have the same msd lenght
+    shortest_msd = np.inf
+    for file in tracks:
+        _, dur, _ = np.shape(file)
+        if dur-1<shortest_msd:
+            shortest_msd=dur-1 #This -4 eliminates the high error msds
     name = 0
-    if show_fig==True:
-        plt.figure()
-    for file in all_files:
-        msdt = []
-        t = np.linspace(1, len(file[0])-1, len(file[0])-1) #define time
-        #calculate msd for each track in the file
+    final_msds = []
+    final_mean_msds = []
+    for file in tracks:
+        t_count = 0
+        msds = np.zeros((len(file), shortest_msd, 3))
+        diff_coef = np.zeros((len(file), 2))
         for track in file:
-            xyz = track[:,2:]
-            msd0 = ezmsd(xyz)
-            msdt.append(msd0)
-            msd = np.array(msdt)
-
-        #calculate mean msd
-        mean_msd = np.zeros((len(msd[0])))
-        std_dev = np.zeros((len(msd[0])))
-        for k in range(0, len(msd[0])):
-            mean_msd[k] = np.mean(msd[:,k])
-            std_dev[k] = np.std(msd[:,k])/np.sqrt(len(msd[:,k]))
-
-        #adding msd to all files list
-        all_files_msd.append(np.array(msd))
-        all_files_mean_msd.append(mean_msd)
+            copy_track = np.copy(track)
+            msd = np.zeros((shortest_msd, 3))
+            msd[:,0] = copy_track[:shortest_msd,0]
+            dt = np.min(np.diff(copy_track[:dur,1], axis=0))
+            copy_track[:shortest_msd+1,1] = copy_track[:shortest_msd+1,1]/dt
+            txyz = copy_track[:shortest_msd+1,1:]
+            msd0 = ezmsd(txyz)
+            msd[:,1:] = msd0[:shortest_msd,:]
+            msds[t_count,:,:] = msd
+            regr = linregress(np.log10(msd0[:int(shortest_msd/2),0]), np.log10(msd0[:int(shortest_msd/2),1]))
+            D = regr.slope/6
+            diff_coef[t_count,:] = np.array([int(np.min(msd[:,0])), D])
+            t_count+=1
+        file_msd = np.reshape(msds[:,:,:], (len(file)*shortest_msd, 3))
+        time_lags = msds[0,:,1]
+        mean_msd = np.mean(msds[:,:,2], axis=0)
+        std_dev = np.std(msds[:,:,2], axis=0)/np.sqrt(shortest_msd)
+        final_msds.append(file_msd)
+        final_mean_msds.append(np.array([time_lags,mean_msd,std_dev]))
 
         #save the file
-        if save_xlsx==True:
-            savename = f'{os.path.join(savedir,name_list[name])}_MSD.xlsx'
-            df = DataFrame({'Time lag': t*dt, 'msd': mean_msd, 'std': std_dev})
-            df.to_excel(savename, sheet_name='MeanMSD', index=False)
+        if save_results:
+            savename = f'{os.path.join(savedir,names[name])}_msd.xlsx'
+            df1 = DataFrame({'track_id':file_msd[:,0], f'dt ({timelapse_units})': file_msd[:,1]*dt, 'msd': file_msd[:,2]})
+            df2 = DataFrame({f'dt ({timelapse_units})': time_lags*dt, 'msd': mean_msd, 'std_dev': std_dev})
+            df3 = DataFrame({'track_id':diff_coef[:,0], 'diffusion_coefficient': diff_coef[:,1]})
+            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+                df1.to_excel(writer, sheet_name='track_msd', index=False)
+                df2.to_excel(writer, sheet_name='mean_msd', index=False)
+                df3.to_excel(writer, sheet_name='diff_coef', index=False)
+            name = name+1
+    return final_msds, final_mean_msds
 
-        if show_fig==True:
-            plt.plot(t*dt, mean_msd, label=name_list[name])
-            plt.xscale('log')
-            plt.yscale('log')
-            plt.legend()
-        
-        name = name+1
+def directionality_tortuosity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+    '''
+    This function determines the directionality and the tortuosity for each track in the given files.
+    Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
-    if show_fig==True:
-        plt.show()
+    Args:
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
 
-    return
+    Returns:
+        directionality: list of directionalities of all valid tracks
+        tortuosity: list of tortuosity of all valid tracks
+    '''
+    name = 0
+    directionality = []
+    tortuosity = []
+    for file in tracks:
+        file_directionality=[]
+        file_tortuosity=[]
+        file_track_id=[]
+        for track in file:
+            xyz = track[:,2:]
+            d_euclidean = np.sqrt(np.sum((xyz[-1,:]-xyz[0,:])**2, axis=0))
+            d_total = np.sum(np.linalg.norm(np.diff(xyz,axis=0),axis=-1))
+            file_track_id.append(track[0,0])
+            file_directionality.append(d_euclidean/d_total)
+            file_tortuosity.append(d_total/d_euclidean)
+        directionality.append(np.array(file_directionality))
+        tortuosity.append(np.array(file_tortuosity))
 
-def get_acf(dirname, dt, save_xlsx=True, savedir=None, show_fig=False):
+        if save_results:
+            savename = f'{os.path.join(savedir,names[name])}_directionality_tortuosity.xlsx'
+            df1 = DataFrame({'track_id':np.array(file_track_id),'directionality':np.array(file_directionality),'tortuosity':np.array(tortuosity)})
+            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+                df1.to_excel(writer, sheet_name='direct_tortuos', index=False)
+
+    return directionality, tortuosity
+
+def spatial_coverage(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+    '''
+    This function determines the spatial coverage for each track in the given files.
+    Excel files need to have the following column order: [track_id, t, x, y, (z)].
+
+    Args:
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
+
+    Returns:
+        sp_cov: list of spatial coverages for each track in files
+    '''
+    name = 0
+    sp_cov = []
+    for file in tracks:
+        file_spatial_coverage=[]
+        file_track_id=[]
+        for track in file:
+            xyz = track[:,2:]
+            file_track_id.append(track[0,0])
+            hull = ConvexHull(xyz, qhull_options='QJ')
+            spatial_coverage = hull.volume
+            file_spatial_coverage.append(spatial_coverage)
+        sp_cov.append(np.array(file_spatial_coverage))
+
+        if save_results:
+            savename = f'{os.path.join(savedir,names[name])}_spatial_coverage.xlsx'
+            df1 = DataFrame({'track_id':np.array(file_track_id),'spatial_coverage':np.array(file_spatial_coverage)})
+            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+                df1.to_excel(writer, sheet_name='sp_cov', index=False)
+    return sp_cov
+
+def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+    '''
+    This function calculates the total turning angle of each track in the given files.
+    Excel files need to have the following column order: [track_id, t, x, y, (z)].
+
+    Args:
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
+
+    Returns:
+        : list of spatial coverages for each track in files
+    '''
+    name = 0
+    turning_angle = []
+    for file in tracks:
+        file_tta=[]
+        file_track_id=[]
+        for track in file:
+            xyz = track[:,2:]
+            dxyz = np.diff(xyz, axis=0)
+            total_turning_angle = 0
+            for i in range(1, len(dxyz)):
+                dir1=dxyz[i-1,:]
+                dir2=dxyz[i,:]
+                if np.linalg.norm(dir1)==0 or np.linalg.norm(dir2)==0:
+                    continue
+                cos_angle = np.dot(dir1, dir2)/(np.linalg.norm(dir1)*np.linalg.norm(dir2))
+                cos_angle = np.clip(cos_angle, -1, 1)
+                angle = np.degrees(np.arccos(cos_angle))
+                total_turning_angle += angle
+            file_tta.append(total_turning_angle)
+        turning_angle.append(np.array(file_tta))
+
+        if save_results:
+            savename = f'{os.path.join(savedir,names[name])}_total_turning_angle.xlsx'
+            df1 = DataFrame({'track_id':np.array(file_track_id),'total_turning_angle':np.array(file_tta)})
+            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+                df1.to_excel(writer, sheet_name='sp_cov', index=False)
+    return turning_angle
+
+def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str):
     '''
     This function determines the acf for each file in the directory, with the corresponding error.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        dirname (string): path to the folder containing the Excel files
-        dt (int): trajectory time step size
-        save_xlsx (bool): Defults to True. Determines if an Excel file with the results of the function will be saved.
-        savedir (string): Defaults to None. Path to the folder where results will be saved. If set to None, a folder will be created in the directory containing the tracks.
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        savedir (str): path where resulting excels will be saved. Defaults to None
 
     Returns:
-        list: list of mean acf arrays, one array per file in the directory. Mean acf arrays columns correspond to [time lag, mean acf, error acf].
-
-    TODO:
-        Some tracks present strange behaviour when simulated. Possible index error
+        list: list of mean speeds of the tracks
     '''
-    all_files, name_list = get_traj(dirname)
-
-    if os.path.isfile(dirname):
-        raise ValueError('Error: please indicate the path to the folder where results will be saved.')
-
-    if savedir==None:
-        if not os.path.exists(os.path.abspath(fr'{dirname}\Results')):
-            os.makedirs(os.path.abspath(fr'{dirname}\Results'))
-        savedir = os.path.abspath(fr'{dirname}\Results')
-
-    if show_fig==True:
-        plt.figure()
+    shortest_acf = np.inf
+    for file in tracks:
+        _, dur, _ = np.shape(file)
+        if dur-1<shortest_acf:
+            shortest_acf=dur-1
+    
     name=0
-    for file in all_files:
-        t = np.linspace(1, len(file[0])-2, len(file[0])-2)
-        acf_list = []
+    for file in tracks:
+        acfs = np.zeros((len(file), shortest_acf, 3))
         #calculate acf for each track in the file
         for track in file:
+            copy_track = np.copy(track)
+            acf = np.zeros((shortest_acf, 3))
+            acf[:,0] = copy_track[:shortest_acf,0]
+            dt = np.min(np.diff(copy_track[:dur,1], axis=0))
+            txyz = copy_track[:shortest_acf+1,2:]
+            dtxyz = txyz
+            copy_track[:shortest_acf+1,1] = copy_track[:shortest_acf+1,1]/dt
+            timelags = range(0,len(txyz))
+            timestamps = range(0,len(txyz)-2)
+            for timelag in timelags:
+                acf_timelag = []
+                for timestamp in timestamps:
+                    acf = np.sum()
+                    acf_timelag.append()
+                    
+
+
+
+
             xyz = track[:,2:]
             dxyz = xyz[1:,:]-xyz[:-1,:]
             M = len(dxyz[:,0])
@@ -348,10 +540,6 @@ def get_acf(dirname, dt, save_xlsx=True, savedir=None, show_fig=False):
 
         norm = sum(abs(mean_acf[:]))
 
-        if show_fig==True:
-            plt.plot(t*dt, mean_acf/norm, label=name_list[name])
-            plt.legend()
-
         #save the file
         if save_xlsx==True:
             savename = f'{os.path.join(savedir,name_list[name])}_ACF.xlsx'
@@ -360,11 +548,10 @@ def get_acf(dirname, dt, save_xlsx=True, savedir=None, show_fig=False):
 
         name = name+1
 
-    if show_fig==True:
-        plt.show()
-
     return
 
+
+#################################
 def PDF_dR(dirname, dt, tlag, dmax=30, binn=50, tunit='min', save_xlsx=True, savedir=None):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
@@ -470,7 +657,7 @@ def PDF_dtheta(dirname, dt, tlag, binn=9, tunit='min', save_xlsx=True, savedir=N
 
     return
 
-def polarity_dR(dirname, dt, tlag, binn = 20, savedir = None):
+def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
     '''
     This function is used to determine the polarity of the velocity. It detrmines the primary axis and rotates the 
     '''

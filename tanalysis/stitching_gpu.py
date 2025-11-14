@@ -156,6 +156,7 @@ def make_grid(im_list, positions):
     ncol=0
     grid_list=[]
     for im in im_list:
+        im = cp.asarray(im)
         img = []
         for timestep in im:
             grid={}
