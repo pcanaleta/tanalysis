@@ -108,7 +108,7 @@ def filter_traj(dirname:str, filter_values:dict) -> list:
             #Track parameters
             track_duration = track[-1,1]-track[0,1]
             total_distance = np.sum(np.linalg.norm(np.diff(track[:,2:],axis=0),axis=-1))
-            track_velocity = np.linalg.norm(np.diff(track[:,2:], axis=0),axis=-1)/track[1,1]
+            track_velocity = np.linalg.norm(np.diff(track[:,2:], axis=0),axis=-1)/(np.diff(track[:,1], axis=0))
             mean_velocity = np.mean(track_velocity, axis=-1)
             max_velocity = np.max(track_velocity)
             min_velocity = np.min(track_velocity)
@@ -335,7 +335,7 @@ def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
             msd[:,1:] = msd0[:shortest_msd,:]
             msds[t_count,:,:] = msd
             regr = linregress(np.log10(msd0[:int(shortest_msd/2),0]), np.log10(msd0[:int(shortest_msd/2),1]))
-            D = regr.slope/6
+            D = abs(regr.slope/6)
             diff_coef[t_count,:] = np.array([int(np.min(msd[:,0])), D])
             t_count+=1
         file_msd = np.reshape(msds[:,:,:], (len(file)*shortest_msd, 3))
@@ -504,7 +504,6 @@ def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
         _, dur, _ = np.shape(file)
         if dur-1<shortest_acf:
             shortest_acf=dur-1
-    
     name=0
     for file in tracks:
         file_acf=[]
@@ -545,7 +544,7 @@ def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
 
         if save_results:
             savename = f'{os.path.join(savedir,names[name])}_acf.xlsx'
-            df1 = DataFrame({'track_id':np.array(file_track_ids).flatten(),'timelag':np.array(file_time_lags).flatten(),'total_turning_angle':np.array(file_acf).flatten()})
+            df1 = DataFrame({'track_id':np.array(file_track_ids).flatten(),f'timelag ({timelapse_units})':np.array(file_time_lags).flatten(),'total_turning_angle':np.array(file_acf).flatten()})
             df2 = DataFrame({'timelag':timelags*dt, 'mean_acf':mean_acf, 'std_acf':std_acf})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
                 df1.to_excel(writer, sheet_name='track_acf', index=False)
