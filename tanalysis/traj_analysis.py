@@ -458,11 +458,13 @@ def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str,
     for file in tracks:
         file_tta=[]
         file_track_id=[]
+        avg_persistence = []
         for track in file:
             track_id = track[0,0]
             xyz = track[:,2:]
             dxyz = np.diff(xyz, axis=0)
             total_turning_angle = 0
+            persistence=[]
             for i in range(1, len(dxyz)):
                 dir1=dxyz[i-1,:]
                 dir2=dxyz[i,:]
@@ -470,17 +472,19 @@ def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str,
                     continue
                 cos_angle = np.dot(dir1, dir2)/(np.linalg.norm(dir1)*np.linalg.norm(dir2))
                 cos_angle = np.clip(cos_angle, -1, 1)
+                persistence.append(cos_angle)
                 angle = np.degrees(np.arccos(cos_angle))
                 total_turning_angle += angle
             file_tta.append(total_turning_angle)
             file_track_id.append(track_id)
+            avg_persistence.append(np.mean(persistence))
         turning_angle.append(np.array(file_tta))
 
         if save_results:
             savename = f'{os.path.join(savedir,names[name])}_total_turning_angle.xlsx'
-            df1 = DataFrame({'track_id':np.array(file_track_id),'total_turning_angle':np.array(file_tta)})
+            df1 = DataFrame({'track_id':np.array(file_track_id),'total_turning_angle':np.array(file_tta), 'persistence':np.array(avg_persistence)})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='sp_cov', index=False)
+                df1.to_excel(writer, sheet_name='tt_angle', index=False)
 
         name+=1
     return turning_angle
