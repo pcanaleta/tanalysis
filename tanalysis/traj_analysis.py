@@ -188,6 +188,7 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
         min = np.zeros((len(file), 5))
         for track in file:
             xyz = track[:,2:]
+            ids = track[1:,0]
             dxyz = np.diff(xyz, axis=0)
             dt = np.diff(track[:,1], axis=0)
             vxyz = np.transpose(np.transpose(dxyz)/(dt))
@@ -197,7 +198,7 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
             v = np.array([vr, vxyz[:,0], vxyz[:,1], vxyz[:,2]])
             absv = np.array([vr, absvxyz[:,0], absvxyz[:,1], absvxyz[:,2]])
             #Determine parameters of interest
-            track_id = track[0,0]
+            track_id = np.min(ids)
             means[track_count,:] = np.array([int(track_id), *np.mean(absv, axis=-1)])
             std[track_count,:] = np.array([int(track_id), *np.std(absv, axis=-1)])
             median[track_count,:] = np.array([int(track_id), *np.median(absv, axis=-1)])
@@ -216,11 +217,11 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
         if save_results:
             savename = f'{os.path.join(savedir,names[name])}_velocity.xlsx'
             df1 = DataFrame({'track_id': velocities[:,0], f'dt ({timelapse_units})': velocities[:,1]*dt_value, 'r_velocity': velocities[:,2], 'x_velocity': velocities[:,3], 'y_velocity': velocities[:,4], 'z_velocity': velocities[:,5]})
-            df2 = DataFrame({'track_id': np.int8(means[:,0]), 'r_velocity': np.double(means[:,1]), 'x_velocity': np.double(means[:,2]), 'y_velocity': np.double(means[:,3]), 'z_velocity': np.double(means[:,4])})
-            df3 = DataFrame({'track_id': np.int8(median[:,0]), 'r_velocity': np.double(median[:,1]), 'x_velocity': np.double(median[:,2]), 'y_velocity': np.double(median[:,3]), 'z_velocity': np.double(median[:,4])})
-            df4 = DataFrame({'track_id': np.int8(std[:,0]), 'r_velocity': np.double(std[:,1]), 'x_velocity': np.double(std[:,2]), 'y_velocity': np.double(std[:,3]), 'z_velocity': np.double(std[:,4])})
-            df5 = DataFrame({'track_id': np.int8(max[:,0]), 'r_velocity': np.double(max[:,1]), 'x_velocity': np.double(max[:,2]), 'y_velocity': np.double(max[:,3]), 'z_velocity': np.double(max[:,4])})
-            df6 = DataFrame({'track_id': np.int8(min[:,0]), 'r_velocity': np.double(min[:,1]), 'x_velocity': np.double(min[:,2]), 'y_velocity': np.double(min[:,3]), 'z_velocity': np.double(min[:,4])})
+            df2 = DataFrame({'track_id': np.int16(means[:,0]), 'r_velocity': np.double(means[:,1]), 'x_velocity': np.double(means[:,2]), 'y_velocity': np.double(means[:,3]), 'z_velocity': np.double(means[:,4])})
+            df3 = DataFrame({'track_id': np.int16(median[:,0]), 'r_velocity': np.double(median[:,1]), 'x_velocity': np.double(median[:,2]), 'y_velocity': np.double(median[:,3]), 'z_velocity': np.double(median[:,4])})
+            df4 = DataFrame({'track_id': np.int16(std[:,0]), 'r_velocity': np.double(std[:,1]), 'x_velocity': np.double(std[:,2]), 'y_velocity': np.double(std[:,3]), 'z_velocity': np.double(std[:,4])})
+            df5 = DataFrame({'track_id': np.int16(max[:,0]), 'r_velocity': np.double(max[:,1]), 'x_velocity': np.double(max[:,2]), 'y_velocity': np.double(max[:,3]), 'z_velocity': np.double(max[:,4])})
+            df6 = DataFrame({'track_id': np.int16(min[:,0]), 'r_velocity': np.double(min[:,1]), 'x_velocity': np.double(min[:,2]), 'y_velocity': np.double(min[:,3]), 'z_velocity': np.double(min[:,4])})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
                 df1.to_excel(writer, sheet_name='track_velocity', index=False)
                 df2.to_excel(writer, sheet_name='track_mean', index=False)
