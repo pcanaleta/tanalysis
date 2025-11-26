@@ -174,6 +174,7 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
         list: list of mean speeds of the tracks
     '''    
     name = 0
+    inst_speeds = []
     speed_means = []
     for file in tracks:
         file_velocity = []
@@ -212,6 +213,7 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
 
         all_vels = np.asarray(file_vels)
         velocities = np.reshape(all_vels, (all_vels.shape[0]*all_vels.shape[1], 6))
+        inst_speeds.append(velocities)
         speed_means.append(means)
         #save velocity into excel files, if multiple files have been readed, multiple excel files will be created
         if save_results:
@@ -230,7 +232,7 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
                 df5.to_excel(writer, sheet_name='track_max', index=False)
                 df6.to_excel(writer, sheet_name='track_min', index=False)
             name = name+1
-    return speed_means
+    return inst_speeds, speed_means
 
 def ezmsd_old(xyz:np.ndarray) -> np.ndarray:
     '''
@@ -455,6 +457,7 @@ def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str,
     '''
     name = 0
     turning_angle = []
+    persist = []
     for file in tracks:
         file_tta=[]
         file_track_id=[]
@@ -479,6 +482,7 @@ def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str,
             file_track_id.append(track_id)
             avg_persistence.append(np.mean(persistence))
         turning_angle.append(np.array(file_tta))
+        persist.append(np.array(avg_persistence))
 
         if save_results:
             savename = f'{os.path.join(savedir,names[name])}_total_turning_angle.xlsx'
@@ -487,7 +491,7 @@ def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str,
                 df1.to_excel(writer, sheet_name='tt_angle', index=False)
 
         name+=1
-    return turning_angle
+    return turning_angle, persistence
 
 def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
     '''
@@ -544,7 +548,7 @@ def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
         #Calculate mean acf for the file
         arr_acf = np.array(file_acf)
         mean_acf = np.mean(arr_acf,axis=0)
-        std_acf = np.std(arr_acf,axis=0)/np.sqrt(len(mean_acf))
+        std_acf = np.std(arr_acf,axis=0)/np.sqrt(len(arr_acf))
         timelags = range(1,len(mean_acf)+1)
 
         if save_results:
