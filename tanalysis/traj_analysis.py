@@ -269,33 +269,29 @@ def ezmsd(txyz:np.ndarray) -> np.ndarray:
     '''
     s = np.shape(txyz)
     fn = s[0]
-    msdr = np.zeros((fn-1,3)) #[tlag, sum, n_values]
-    msdr[:,2] = 1
+    msdr = np.zeros((fn-1,2)) #[tlag, sum, n_values]
     track_msd = np.zeros((fn-1,2))
+    track_msd[:,0] = np.arange(1, fn)
     if len(s)!=1:
         for tlag in range(1,fn):
             dtxyz = txyz[tlag:,:] - txyz[:-tlag,:]
             for elem in dtxyz:
                 tlag = int(elem[0])
                 try:
-                    msdr[tlag-1,0] = tlag
-                    msdr[tlag-1,1] += np.sum(elem[1:]**2)
-                    msdr[tlag-1,2] += 1
+                    msdr[tlag-1,0] += np.sum(elem[1:]**2)
+                    msdr[tlag-1,1] += 1
                 except:
                     #timelag too big
                     continue
-            track_msd[:,0] = msdr[:,0]
-            track_msd[:,1] = msdr[:,1]/msdr[:,2]
+        track_msd[:,1] = msdr[:,0]/msdr[:,1]
     else:
         for tlag in range(1,fn):
             dtxyz = txyz[tlag:] - txyz[:-tlag]
             for elem in dtxyz:
                 tlag = int(elem[0])
-                msdr[tlag-1,0] = tlag
-                msdr[tlag-1,1] += elem[1]
-                msdr[tlag-1,2] += 1
-            track_msd[:,0] = np.int(msdr[:,0])
-            track_msd[:,1] = msdr[:,1]/msdr[:,2]
+                msdr[tlag-1,0] += elem[1]**2
+                msdr[tlag-1,1] += 1
+        track_msd[:,1] = msdr[:,0]/msdr[:,1]
     return track_msd
 
 def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
@@ -319,7 +315,7 @@ def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
     for file in tracks:
         _, dur, _ = np.shape(file)
         if dur-1<shortest_msd:
-            shortest_msd=dur-1 #This -4 eliminates the high error msds
+            shortest_msd=dur-1 
     name = 0
     final_msds = []
     final_mean_msds = []
