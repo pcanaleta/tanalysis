@@ -588,7 +588,7 @@ def fit_APRW(tracks, names, savedir):
             t = track[:,1]
             xyz = track[:,2:]
             dt = np.min(np.diff(track[:,1]))
-            used_len = np.uint16(np.round(len(track))/3)
+            used_len = np.uint16(np.round(len(track))/4)
             dtxyz = np.diff(xyz, axis=0)
             xyzr = xyz-np.mean(xyz, axis=0) #major axis of trajectories
             U,S,V = np.linalg.svd(dtxyz, full_matrices=True)
@@ -605,9 +605,9 @@ def fit_APRW(tracks, names, savedir):
             msdp0 = ezmsd(txyz[:,:2])[:,1]
             msdp = msdp0[:used_len]
             wtp = (msdp*wif**2)
-            msdnp0 = ezmsd(xyzrot[:,:3:2])[:,1]
+            msdnp0 = ezmsd(txyz[:,:3:2])[:,1]
             if dim==3:
-                msdnp0 += ezmsd(xyzrot[:,::3])[:,1]
+                msdnp0 += ezmsd(txyz[:,::3])[:,1]
             msdnp = msdnp0[:used_len]
             wtnp = (msdnp*wif**2)
                         
@@ -654,7 +654,6 @@ def sim_APRW(dirname, tracks, Nmax=50, repeats=30, subsamples=100):
     dt = tlag/subsample 
     savedir = fr'{dirname}\Simulations'
     if not os.path.exists(savedir):
-        print('Creating dir')
         os.makedirs(savedir)
 
     params = []
