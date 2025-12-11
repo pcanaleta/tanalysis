@@ -559,16 +559,16 @@ def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
 
     return
 
-def tPRW3D(x, P, S, SE):
+def tPRW3D(x:np.ndarray, P:float, S:float, SE:float):
     return 3*(S**2)*P*(x-P*(1-np.exp(-x/P)))+6*SE**2
 
-def tPRW2D(x, P, S, SE):
+def tPRW2D(x:np.ndarray, P:float, S:float, SE:float):
     return 2*(S**2)*P*(x-P*(1-np.exp(-x/P)))+4*SE**2
 
-def tPRW1D(x, P, S, SE):
+def tPRW1D(x:np.ndarray, P:float, S:float, SE:float):
     return (S**2)*P*(x-P*(1-np.exp(-x/P)))+2*SE**2
 
-def fit_APRW(tracks, names, savedir):
+def fit_APRW(tracks:list[np.ndarray], names:list[str], savedir:str):
     '''
     This functions rotates the trajectories to the primary axis of migration (p) and calculates the msd for the primary and non primary axis.
 
@@ -634,7 +634,7 @@ def fit_APRW(tracks, names, savedir):
 
     return params
 
-def sim_APRW(dirname, tracks, Nmax=50, repeats=30, subsamples=100):
+def sim_APRW(dirname:str, tracks:list[np.ndarray], Nmax:int=50, repeats:int=30, subsamples:int=100):
     '''
     This function simulates different tracks with the parameters determined in the fitting. The function saves an .xlsx file with all simulated tracks
 
@@ -747,8 +747,7 @@ def sim_APRW(dirname, tracks, Nmax=50, repeats=30, subsamples=100):
         n = n+1  
     return
 
-#################################
-def PDF_dR(dirname, dt, tlag, dmax=30, binn=50, tunit='min', save_xlsx=True, savedir=None):
+def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calculation_tlag:int, savedir:str=None, save_results:bool=True):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
     For a given time lag, it calculates all displacements and distributes them along the given number of bins, up to the maximum displacement assigned.
@@ -765,42 +764,36 @@ def PDF_dR(dirname, dt, tlag, dmax=30, binn=50, tunit='min', save_xlsx=True, sav
 
     returns:
         list: list of lists for each file. Each file list corresponds to two arrays, the first one for the histogram data and the second one for the bins.
+        
     '''
-    all_files, name_list = get_traj(dirname)
+    if not os.path.exists(savedir):
+        os.makedirs(os.path.abspath(savedir))
 
-    if os.path.isfile(dirname):
-        raise ValueError('Error: please indicate the path to the folder where results will be saved.')
-
-    if savedir==None:
-        if not os.path.exists(os.path.abspath(fr'{dirname}\Results')):
-            os.makedirs(os.path.abspath(fr'{dirname}\Results'))
-        savedir = os.path.abspath(fr'{dirname}\Results')
-
-    all_files_PDF_dR = []
-    bin_distr = np.linspace(0, dmax, binn)
-    ntlag = int(tlag/dt)
-    for file in all_files:
-        displ = []
+    all_d_euc = []
+    tracks_d_euc = []
+    for file in tracks:
+        file_d_euc = []
         #calculate PDF_dR for each track in the file
         for track in file:
-            t = track[:,1]
-            xyz = track[:,2:]
-            dxyz = xyz[ntlag:,:]-xyz[:-ntlag,:]
-            displ.append(np.mean(dxyz,axis=1))
-        hist, bins = np.histogram(np.array(displ), bin_distr, density=True)
-        all_files_PDF_dR.append([hist, bins[0:-1]])
+            d_euc = np.linalg.norm(track[calculation_tlag:,2:]-track[:-calculation_tlag,2:], axis=-1)
+            file_d_euc.append(np.mean(d_euc))
+            all_d_euc.append(np.mean(d_euc))
+        tracks_d_euc.append(np.array(all_d_euc))
 
-    #save PDF_dR into excel files, if multiple files have been readed, multiple excel files will be created
+    all_hist, all_bins = np.histogram(all_d_euc, bins='auto')
     name = 0
-    if save_xlsx==True:
-        for file in all_files_PDF_dR:
-            savename = f'{os.path.join(savedir,name_list[name])}_PDF_dR_{tlag}{tunit}.xlsx'
-            df = DataFrame({'bins': file[1], 'PDF_dR': file[0]})
-            df.to_excel(savename, sheet_name='PDF_dR', index=False)
+    for file in tracks_d_euc:
+        hist, bins = np.histogram(file, all_bins)
+        #save PDF_dR into excel files, if multiple files have been readed, multiple excel files will be created
+        if save_results:
+            savename = f'{os.path.join(savedir,names[name])}_PDF_dR.xlsx'
+            df1 = DataFrame({'bins': bins[:-1], 'hist': hist})
+            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+                df1.to_excel(writer, sheet_name='PDF_dR', index=False)
             name = name+1
-
     return
 
+######################################
 def PDF_dtheta(dirname, dt, tlag, binn=9, tunit='min', save_xlsx=True, savedir=None):
     '''
     This function calculates the probability density funtion (PDF) of the angle. 
