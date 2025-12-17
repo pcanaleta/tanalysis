@@ -1,6 +1,5 @@
 import numpy as np
 from tqdm import tqdm
-
 ### Translation Computation ###
 def pcm(image1:np.ndarray, image2:np.ndarray):
     """
@@ -53,6 +52,7 @@ def ncc(image1:np.ndarray, image2:np.ndarray):
     n = np.dot(I1 - np.mean(I1), I2 - np.mean(I2))
     d = np.linalg.norm(I1 - np.mean(I1)) * np.linalg.norm(I2 - np.mean(I2))
     del I1,I2
+    np.seterr(divide='ignore', invalid='ignore')
     return n/d
 
 def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
@@ -167,6 +167,7 @@ def make_grid(im_list, positions):
                 grid[f'{pos[1]}{pos[0]}']=tile
             img.append(grid)
         grid_list.append(img)
+    del im_list
     return grid_list, nrow, ncol
 
 def translationComputation(imgs, positions, n=8, n_frames=20) -> np.ndarray:
@@ -186,13 +187,16 @@ def translationComputation(imgs, positions, n=8, n_frames=20) -> np.ndarray:
     
     #Finding the peaks for some t and z
     translations_list = []
+    max_img_frames = len(imgs[0])
+    max_z = len(imgs[0][0])
+    del imgs
     for img in grid_list:
         translations = []
-        if n_frames>len(imgs[0]):
-            print(f'The number of frames selected is bigger than the frames in the image. Using {len(imgs[0])} frames instead')
-        for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/n_frames)), 'Calculating translation vectors'):
+        if n_frames>max_img_frames:
+            print(f'The number of frames selected is bigger than the frames in the image. Using {max_img_frames} frames instead')
+        for t in tqdm(range(0, max_img_frames, int(max_img_frames/n_frames)), 'Calculating translation vectors'):
             grid_ = img[t]
-            for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/5)):
+            for z in range(0, max_z, int(max_z/5)):
                 Tvcol=[]
                 Throw=[]
                 Tvrow=[]
@@ -231,7 +235,10 @@ def translationComputation(imgs, positions, n=8, n_frames=20) -> np.ndarray:
         print('All vectors calculated!')
         arr_translations = np.asarray(translations)
         #We should not take in consideration when values are 0
-        drow, rr, dcol, rc = int(np.median(arr_translations[np.nonzero(arr_translations[:,0]),0])), int(np.median(arr_translations[np.nonzero(arr_translations[:,1]),1])), int(np.median(arr_translations[np.nonzero(arr_translations[:,2]),2])), int(np.median(arr_translations[np.nonzero(arr_translations[:,3]),3]))
+        drow = int(np.median(arr_translations[np.nonzero(arr_translations[:,0]),0]))
+        rr = int(np.median(arr_translations[np.nonzero(arr_translations[:,1]),1]))
+        dcol = int(np.median(arr_translations[np.nonzero(arr_translations[:,2]),2]))
+        rc = int(np.median(arr_translations[np.nonzero(arr_translations[:,3]),3]))
         translations_list.append([drow, rr, dcol, rc])
         print(translations_list)
     del grid_list
@@ -251,8 +258,9 @@ def image_reconstruction(imgs, positions, translations_list):
         res_img_list: list of resulting images
     '''
     grid_list, nrow, ncol = make_grid(imgs, positions)
-
     res_img_list = []
+    T,M,D,H,W = imgs[0].shape
+    del imgs
     for trans_set, grid in zip(translations_list, grid_list):
         abs_translations = {}
         minr=0
@@ -267,16 +275,15 @@ def image_reconstruction(imgs, positions, translations_list):
                     minr=minr_
                 if minc_<minc:
                     minc=minc_
-        H,W = imgs[0].shape[-2], imgs[0].shape[-1]
         Hmax,Wmax = abs_translations[f'{nrow-1}{ncol-1}']
         rerr = abs(minr)
         cerr = abs(minc)
         nH,nW = Hmax+H+2*rerr, Wmax+W+2*cerr
         ntiles = len(abs_translations)
-        res_img = np.empty((imgs[0].shape[0], imgs[0].shape[-3], nH, nW), dtype=np.uint8)
+        res_img = np.empty((T, D, nH, nW), dtype=np.uint16)
         t=0
         for grid_t in tqdm(grid, 'Reconstructing timeframes'):
-            for z in np.arange(imgs[0].shape[-3]):
+            for z in np.arange(D):
                 tiles = np.empty((ntiles, nH, nW))
                 for trans, i in zip(abs_translations, range(0, ntiles)):
                     result = np.zeros((nH, nW))
@@ -293,4 +300,6 @@ def image_reconstruction(imgs, positions, translations_list):
             t+=1
         res_img_list.append(res_img)
         del res_img
+        del tiles
+    del grid_list
     return res_img_list

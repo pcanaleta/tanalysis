@@ -2,7 +2,6 @@ import os
 import tifffile as tiff
 import numpy as np
 import shutil
-from tqdm import tqdm
 import liffile as lif
 
 try:
@@ -16,12 +15,6 @@ try:
     CELLPOSE = True
 except:
     CELLPOSE = False
-
-try:
-    import cupy as cp
-    CUPY = True
-except:
-    CUPY = False
 
 def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     '''
@@ -76,14 +69,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
         i=i+1
         #For tiff files
         if ext==".tif" or ext==".tiff":
-            if gpu==True and CUPY==True:
-                image = cp.asarray(tiff.imread(file))
-            elif gpu==True and CUPY==False:
-                print('Cupy not installed, please, install cupy and cuda to use GPU. https://cupy.dev/')
-                print('Using CPU')
-                image = np.asarray(tiff.imread(file))
-            elif gpu==False:
-                image = np.asarray(tiff.imread(file))
+            image = np.asarray(tiff.imread(file))
             im_list.append(image)
         #For lif files
         elif ext==".lif":
@@ -93,11 +79,6 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
                 for i in range(0,10):
                     try:
                         im = lif.imread(file, image=i)
-                        if gpu==True and CUPY==True:
-                            im = cp.asarray(im)
-                        elif gpu==True and CUPY==False:
-                            print('Cupy not installed, please, install cupy and cuda to use GPU. https://cupy.dev/')
-                            print('Using CPU')
                         im_list.append(im)
                     except:
                         continue

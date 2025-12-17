@@ -764,7 +764,6 @@ def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calcul
 
     returns:
         list: list of lists for each file. Each file list corresponds to two arrays, the first one for the histogram data and the second one for the bins.
-        
     '''
     if not os.path.exists(savedir):
         os.makedirs(os.path.abspath(savedir))
@@ -780,7 +779,7 @@ def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calcul
             all_d_euc.append(np.mean(d_euc))
         tracks_d_euc.append(np.array(all_d_euc))
 
-    all_hist, all_bins = np.histogram(all_d_euc, bins='auto')
+    _, all_bins = np.histogram(all_d_euc, bins='auto')
     name = 0
     for file in tracks_d_euc:
         hist, bins = np.histogram(file, all_bins)
