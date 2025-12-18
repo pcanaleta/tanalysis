@@ -59,7 +59,7 @@ def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     df.to_excel(savename, sheet_name='trajectories', index=False)  
     return
 
-def get_traj(dirname:str) -> list:
+def get_traj(dirname:str):
     '''
     This function gets the tracks in an excel file and crops them in order to have all tracks with the same length as the shortest track.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
@@ -87,7 +87,7 @@ def get_traj(dirname:str) -> list:
                 print(f'Could not read: {os.path.join(dirname,fname)}')
     return tracks, names
 
-def filter_traj(dirname:str, filter_values:dict) -> list:
+def filter_traj(dirname:str, filter_values:dict):
     '''
     This function applys selected filters to the original tracks.
 
@@ -121,7 +121,7 @@ def filter_traj(dirname:str, filter_values:dict) -> list:
         tracks.append(np.asarray(valid_tracks))
     return tracks, names
 
-def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict=None):
+def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
     '''
     This function reads the tracks in the given excel files and crops them in order to all have the same length.
 
@@ -154,12 +154,12 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict=None):
                 min_len=len(track)
             track_list.append(np.asarray(track))
         for traj in track_list:
-            crop_track.append(traj[:min_len,:])
+            crop_track.append(traj[:int(min_len),:])
         crop_tracks.append(np.asarray(crop_track))
     tracks = crop_tracks
     return tracks, names
 
-def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function is used to calculate the velocity of the cells. It performs the mean between the velocities of all tracks and generates a file containing the velocity for each time frame.
 
@@ -217,6 +217,8 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
         speed_means.append(means)
         #save velocity into excel files, if multiple files have been readed, multiple excel files will be created
         if save_results:
+            if not os.path.isdir(savedir):
+                raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_velocity.xlsx'
             df1 = DataFrame({'track_id': velocities[:,0], f'dt ({timelapse_units})': velocities[:,1]*dt_value, 'r_velocity': velocities[:,2], 'x_velocity': velocities[:,3], 'y_velocity': velocities[:,4], 'z_velocity': velocities[:,5]})
             df2 = DataFrame({'track_id': np.int16(means[:,0]), 'r_velocity': np.double(means[:,1]), 'x_velocity': np.double(means[:,2]), 'y_velocity': np.double(means[:,3]), 'z_velocity': np.double(means[:,4])})
@@ -294,7 +296,7 @@ def ezmsd(txyz:np.ndarray) -> np.ndarray:
         track_msd[:,1] = msdr[:,0]/msdr[:,1]
     return track_msd
 
-def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the msd for each file in the directory, with the corresponding error.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
@@ -321,23 +323,23 @@ def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
     final_mean_msds = []
     for file in tracks:
         t_count = 0
-        msds = np.zeros((len(file), shortest_msd, 3))
+        msds = np.zeros((len(file), int(shortest_msd), 3))
         diff_coef = np.zeros((len(file), 2))
         for track in file:
             copy_track = np.copy(track)
-            msd = np.zeros((shortest_msd, 3))
-            msd[:,0] = copy_track[:shortest_msd,0]
+            msd = np.zeros((int(shortest_msd), 3))
+            msd[:,0] = copy_track[:int(shortest_msd),0]
             dt = np.min(np.diff(copy_track[:dur,1], axis=0))
-            copy_track[:shortest_msd+1,1] = copy_track[:shortest_msd+1,1]/dt
-            txyz = copy_track[:shortest_msd+1,1:]
+            copy_track[:int(shortest_msd)+1,1] = copy_track[:int(shortest_msd)+1,1]/dt
+            txyz = copy_track[:int(shortest_msd)+1,1:]
             msd0 = ezmsd(txyz)
-            msd[:,1:] = msd0[:shortest_msd,:]
+            msd[:,1:] = msd0[:int(shortest_msd),:]
             msds[t_count,:,:] = msd
             regr = linregress(np.log10(msd0[:int(shortest_msd/2),0]), np.log10(msd0[:int(shortest_msd/2),1]))
             D = abs(regr.slope/6)
             diff_coef[t_count,:] = np.array([int(np.min(msd[:,0])), D])
             t_count+=1
-        file_msd = np.reshape(msds[:,:,:], (len(file)*shortest_msd, 3))
+        file_msd = np.reshape(msds[:,:,:], (len(file)*int(shortest_msd), 3))
         time_lags = msds[0,:,1]
         mean_msd = np.mean(msds[:,:,2], axis=0)
         std_dev = np.std(msds[:,:,2], axis=0)/np.sqrt(shortest_msd)
@@ -346,6 +348,8 @@ def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
 
         #save the file
         if save_results:
+            if not os.path.isdir(savedir):
+                raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_msd.xlsx'
             df1 = DataFrame({'track_id':file_msd[:,0], f'dt ({timelapse_units})': file_msd[:,1]*dt, 'msd': file_msd[:,2]})
             df2 = DataFrame({f'dt ({timelapse_units})': time_lags*dt, 'msd': mean_msd, 'std_dev': std_dev})
@@ -357,7 +361,7 @@ def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
             name = name+1
     return final_msds, final_mean_msds
 
-def directionality_tortuosity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+def directionality_tortuosity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the directionality and the tortuosity for each track in the given files.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
@@ -391,6 +395,8 @@ def directionality_tortuosity(tracks:list[np.ndarray], names:list[str], timelaps
         tortuosity.append(np.array(file_tortuosity))
 
         if save_results:
+            if not os.path.isdir(savedir):
+                raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_directionality_tortuosity.xlsx'
             df1 = DataFrame({'track_id':np.array(file_track_id),'directionality':np.array(file_directionality),'tortuosity':np.array(file_tortuosity)})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
@@ -399,7 +405,7 @@ def directionality_tortuosity(tracks:list[np.ndarray], names:list[str], timelaps
 
     return directionality, tortuosity
 
-def spatial_coverage(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+def spatial_coverage(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the spatial coverage for each track in the given files.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
@@ -428,6 +434,8 @@ def spatial_coverage(tracks:list[np.ndarray], names:list[str], timelapse_units:s
         sp_cov.append(np.array(file_spatial_coverage))
 
         if save_results:
+            if not os.path.isdir(savedir):
+                raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_spatial_coverage.xlsx'
             df1 = DataFrame({'track_id':np.array(file_track_id),'spatial_coverage':np.array(file_spatial_coverage)})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
@@ -436,7 +444,7 @@ def spatial_coverage(tracks:list[np.ndarray], names:list[str], timelapse_units:s
         name+=1
     return sp_cov
 
-def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function calculates the total turning angle of each track in the given files.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
@@ -481,6 +489,8 @@ def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str,
         persist.append(np.array(avg_persistence))
 
         if save_results:
+            if not os.path.isdir(savedir):
+                raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_total_turning_angle.xlsx'
             df1 = DataFrame({'track_id':np.array(file_track_id),'total_turning_angle':np.array(file_tta), 'persistence':np.array(avg_persistence)})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
@@ -489,7 +499,7 @@ def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str,
         name+=1
     return turning_angle, persistence
 
-def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str=None, save_results:bool=True):
+def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the acf for each file in the directory, with the corresponding error.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
@@ -519,8 +529,8 @@ def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
             copy_track = np.copy(track)
             track_id = copy_track[:,0]
             dt = np.min(np.diff(copy_track[:dur,1], axis=0))
-            copy_track[:shortest_acf+1,1] = copy_track[:shortest_acf+1,1]/dt
-            txyz = copy_track[:shortest_acf+1,1:]
+            copy_track[:int(shortest_acf)+1,1] = copy_track[:int(shortest_acf)+1,1]/dt
+            txyz = copy_track[:int(shortest_acf)+1,1:]
             dtxyz = np.diff(txyz, axis=0)
             f_dtxyz = []
             t = 0
@@ -548,6 +558,8 @@ def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
         timelags = range(1,len(mean_acf)+1)
 
         if save_results:
+            if not os.path.isdir(savedir):
+                raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_acf.xlsx'
             df1 = DataFrame({'track_id':np.array(file_track_ids).flatten(),f'timelag ({timelapse_units})':np.array(file_time_lags).flatten(),'total_turning_angle':np.array(file_acf).flatten()})
             df2 = DataFrame({'timelag':timelags*dt, 'mean_acf':mean_acf, 'std_acf':std_acf})
@@ -680,7 +692,7 @@ def sim_APRW(dirname:str, tracks:list[np.ndarray], Nmax:int=50, repeats:int=30, 
             mSE = file[i:i+2,2]
             beta = 1/P
             alpha = (S**2)*beta
-            map = [max(0, 1-dt/P[0]), max(0, 1-dt/P[1])]
+            map = np.array([max(0, 1-dt/P[0]), max(0, 1-dt/P[1])])
             mFR = np.sqrt(alpha*dt)*dt
 
             if dim==3:
@@ -747,7 +759,7 @@ def sim_APRW(dirname:str, tracks:list[np.ndarray], Nmax:int=50, repeats:int=30, 
         n = n+1  
     return
 
-def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calculation_tlag:int, savedir:str=None, save_results:bool=True):
+def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calculation_tlag:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
     For a given time lag, it calculates all displacements and distributes them along the given number of bins, up to the maximum displacement assigned.
@@ -785,6 +797,8 @@ def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calcul
         hist, bins = np.histogram(file, all_bins)
         #save PDF_dR into excel files, if multiple files have been readed, multiple excel files will be created
         if save_results:
+            if not os.path.isdir(savedir):
+                raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_PDF_dR.xlsx'
             df1 = DataFrame({'bins': bins[:-1], 'hist': hist})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:

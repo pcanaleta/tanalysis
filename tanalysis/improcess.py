@@ -5,13 +5,13 @@ import shutil
 import liffile as lif
 
 try:
-    from readlif.reader import LifFile
+    from readlif.reader import LifFile # type: ignore
     READLIF = True
 except:
     READLIF = False
 
 try:
-    from cellpose import io, models, train, denoise
+    from cellpose import io, models, train, denoise # type: ignore
     CELLPOSE = True
 except:
     CELLPOSE = False
@@ -92,7 +92,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
 
     return im_list, im_name, im_info
 
-def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:bool=None,):
+def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:str="",):
     '''
     This function segmentates the images with the model selected. The segmented images are saved in the specified directory. 
     
@@ -117,7 +117,7 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
 
     model = models.CellposeModel(gpu=True)
 
-    if modelpath!=None:
+    if os.path.isfile(modelpath):
         model = models.CellposeModel(gpu=True, pretrained_model=modelpath)
 
     if dim == 3:
@@ -182,7 +182,7 @@ def cellposeseg_bigdata(dirname, zarr_path, chunks={0:256,1:256,2:'auto'}, block
     if not CELLPOSE:
         raise ImportError('ERROR: Cellpose package is not installed, please use: pip install cellpose')
 
-    from cellpose.contrib.distributed_segmentation import distributed_eval, numpy_array_to_zarr
+    from cellpose.contrib.distributed_segmentation import distributed_eval, numpy_array_to_zarr # type: ignore
     
     images, dim, im_name = imread(dirname, n_images=1)
 

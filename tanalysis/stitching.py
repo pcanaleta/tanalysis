@@ -170,7 +170,7 @@ def make_grid(im_list, positions):
     del im_list
     return grid_list, nrow, ncol
 
-def translationComputation(imgs, positions, n=8, n_frames=20) -> np.ndarray:
+def translationComputation(imgs, positions, n=8, n_frames=20):
     """
     This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image. The function calculates the translation values drow, rr, dcol, rc which correspond to: vertical translation, error in vertical translation,
     horizontal translation, error in horizontal translation.
