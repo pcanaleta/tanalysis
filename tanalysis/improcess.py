@@ -85,7 +85,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
                 lif_file = LifFile(file)
                 for image_0 in lif_file.get_iter_image():
                     im_info['scale'] = image_0.info['scale']
-                    if tiles==True:
+                    if tiles:
                         im_info['mosaic_position'] = image_0.info['mosaic_position']
         else:
             raise ValueError('ERROR: submited file does not have a supported extension (.tif, .tiff, .lif)')
@@ -155,7 +155,7 @@ def concatenate(dirname, remove_original=False):
         newname = f'{os.path.abspath(os.path.join(dirname,names[0].replace('_T0_cp_masks','')))}.tiff'
         im_concat = np.stack(images, 0)
         
-        if remove_original == True:
+        if remove_original:
             try:
                 shutil.rmtree(dirname)
                 os.makedirs(dirname)
@@ -188,7 +188,7 @@ def cellposeseg_bigdata(dirname, zarr_path, chunks={0:256,1:256,2:'auto'}, block
 
     #convert the numpy array to a zarr
 
-    if time_frames == True:
+    if time_frames:
         im_tf = images
         dim = dim+1
 
@@ -206,7 +206,7 @@ def cellposeseg_bigdata(dirname, zarr_path, chunks={0:256,1:256,2:'auto'}, block
             data_zarr.append(numpy_array_to_zarr(zarr_path, image[k], chunks))
 
     #parametrize cellpose
-    if model==None:
+    if not model:
         model_kwargs = {'gpu':True, 'model_type':'cyto3'}
     else:
         model_kwargs = {'gpu':True, 'pretrained_model':os.path.abspath(model)}

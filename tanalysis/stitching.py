@@ -235,12 +235,16 @@ def translationComputation(imgs, positions, n=8, n_frames=20):
         print('All vectors calculated!')
         arr_translations = np.asarray(translations)
         #We should not take in consideration when values are 0
-        drow = int(np.median(arr_translations[np.nonzero(arr_translations[:,0]),0]))
-        rr = int(np.median(arr_translations[np.nonzero(arr_translations[:,1]),1]))
-        dcol = int(np.median(arr_translations[np.nonzero(arr_translations[:,2]),2]))
-        rc = int(np.median(arr_translations[np.nonzero(arr_translations[:,3]),3]))
-        translations_list.append([drow, rr, dcol, rc])
-        print(translations_list)
+        try:
+            drow = int(np.median(arr_translations[np.nonzero(arr_translations[:,0]),0]))
+            rr = int(np.median(arr_translations[np.nonzero(arr_translations[:,1]),1]))
+            dcol = int(np.median(arr_translations[np.nonzero(arr_translations[:,2]),2]))
+            rc = int(np.median(arr_translations[np.nonzero(arr_translations[:,3]),3]))
+            translations_list.append([drow, rr, dcol, rc])
+            print(translations_list)
+        except:
+            print('No valid translation vectors found')
+            continue
     del grid_list
     return translations_list
 
