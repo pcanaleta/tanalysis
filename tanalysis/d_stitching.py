@@ -12,12 +12,12 @@ def pcm(image1:np.ndarray, image2:np.ndarray):
     Returns:
         PCM (ndArray): 2D peak correlation array with the same size as the original images
     """
-    assert image1.ndim == image2.ndim == 2
+    assert image1.ndim == image2.ndim
     assert image1.shape == image2.shape
-    F1 = np.fft.fft2(image1)
-    F2 = np.fft.fft2(image2)
+    F1 = np.fft.fftn(image1)
+    F2 = np.fft.fftn(image2)
     FC = F1 * np.conjugate(F2)
-    PCM = np.fft.ifft2(FC/np.abs(FC))
+    PCM = np.fft.ifftn(FC/np.abs(FC))
     del FC,F1,F2
     return PCM.real.astype(np.float32)
 
@@ -31,9 +31,9 @@ def multiPeakMax(PCM:np.ndarray):
     Returns:
         tuple: array of n tuples (x,y,val) where x,y correspond to the peak location described in matrix indices
     """
-    row, col = np.unravel_index(np.argsort(np.ravel(PCM)), PCM.shape)
-    vals = PCM[row[::-1], col[::-1]]
-    return np.array((row[::-1], col[::-1], vals))
+    dep, row, col = np.unravel_index(np.argsort(np.ravel(PCM)), PCM.shape)
+    vals = PCM[dep[::-1], row[::-1], col[::-1]]
+    return np.array((dep[::-1], row[::-1], col[::-1], vals))
 
 def ncc(image1:np.ndarray, image2:np.ndarray):
     """
@@ -72,7 +72,7 @@ def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     colend = int(max(0, min(col+W, W, key=int), key=int))
     rowstart = int(max(0, min(row, H, key=int), key=int))
     rowend = int(max(0, min(row+H, H, key=int), key=int))
-    return image[rowstart:rowend, colstart:colend]
+    return image[:, rowstart:rowend, colstart:colend]
 
 def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n=8):
     """
@@ -92,7 +92,7 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
     _ncc = -np.inf
     x = 0
     y = 0
-    H,W = image1.shape
+    D,H,W = image1.shape
 
     rowmagss = [rowin, H-rowin]
     colmagss = [colin, W-colin]
@@ -131,8 +131,8 @@ def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
     This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes the coordinates of the peaks for each peak
 
     Args:
-        image1 (ndArray): 2D image array
-        image2 (ndArray): 2D image array
+        image1 (ndArray): any-dimension image array
+        image2 (ndArray): any-dimension image array
 
     Returns:
         ndArray: tuple containing the peak with the max ncc value (ncc, x, y)
@@ -188,7 +188,6 @@ def translationComputation(imgs, positions, n=8, n_frames=20):
     #Finding the peaks for some t and z
     translations_list = []
     max_img_frames = len(imgs[0])
-    max_z = len(imgs[0][0])
     del imgs
     for img in grid_list:
         translations = []
@@ -196,42 +195,41 @@ def translationComputation(imgs, positions, n=8, n_frames=20):
             print(f'The number of frames selected is bigger than the frames in the image. Using {max_img_frames} frames instead')
         for t in tqdm(range(0, max_img_frames, int(max_img_frames/n_frames)), 'Calculating translation vectors'):
             grid_ = img[t]
-            for z in range(0, max_z, int(max_z/5)):
-                Tvcol=[]
-                Throw=[]
-                Tvrow=[]
-                Thcol=[]
-                for row in np.arange(nrow):
-                    for col in np.arange(ncol):
-                        im2 = grid_[f'{row}{col}'][z]
-                        H,W = im2.shape
-                        if row!=0:
-                            im = grid_[f'{row-1}{col}'][z]
-                            nccv_, Tvrow_, Tvcol_ = pciam(im, im2, n)
-                            if 0.3<nccv_ and abs(Tvrow_)>=int(H*0.8):
-                                Tvcol.append(Tvcol_)
-                                Tvrow.append(Tvrow_)
-                        if col!=0:
-                            im = grid_[f'{row}{col-1}'][z]
-                            ncch_, Throw_, Thcol_ = pciam(im, im2, n)
-                            if 0.3<ncch_ and abs(Thcol_)>=int(W*0.8):
-                                Throw.append(Throw_)
-                                Thcol.append(Thcol_)
-                if Throw==[]:
-                    Throw=[0]
-                if Tvcol==[]:
-                    Tvcol=[0]
-                if Tvrow==[]:
-                    Tvrow=[0]
-                if Thcol==[]:
-                    Thcol=[0]
-                Tv = [int(np.average(Tvrow)), int(np.average(Tvcol))]
-                Th = [int(np.average(Throw)), int(np.average(Thcol))]
-                rr = Th[0]
-                rc = Tv[1]
-                drow = Th[1]-rr
-                dcol = Tv[0]-rc
-                translations.append([drow, rr, dcol, rc])
+            Tvcol=[]
+            Throw=[]
+            Tvrow=[]
+            Thcol=[]
+            for row in np.arange(nrow):
+                for col in np.arange(ncol):
+                    im2 = grid_[f'{row}{col}']
+                    H,W = im2.shape
+                    if row!=0:
+                        im = grid_[f'{row-1}{col}']
+                        nccv_, Tvrow_, Tvcol_ = pciam(im, im2, n)
+                        if 0.3<nccv_ and abs(Tvrow_)>=int(H*0.8):
+                            Tvcol.append(Tvcol_)
+                            Tvrow.append(Tvrow_)
+                    if col!=0:
+                        im = grid_[f'{row}{col-1}']
+                        ncch_, Throw_, Thcol_ = pciam(im, im2, n)
+                        if 0.3<ncch_ and abs(Thcol_)>=int(W*0.8):
+                            Throw.append(Throw_)
+                            Thcol.append(Thcol_)
+            if Throw==[]:
+                Throw=[0]
+            if Tvcol==[]:
+                Tvcol=[0]
+            if Tvrow==[]:
+                Tvrow=[0]
+            if Thcol==[]:
+                Thcol=[0]
+            Tv = [int(np.average(Tvrow)), int(np.average(Tvcol))]
+            Th = [int(np.average(Throw)), int(np.average(Thcol))]
+            rr = Th[0]
+            rc = Tv[1]
+            drow = Th[1]-rr
+            dcol = Tv[0]-rc
+            translations.append([drow, rr, dcol, rc])
         print('All vectors calculated!')
         arr_translations = np.asarray(translations)
         #We should not take in consideration when values are 0
@@ -269,11 +267,7 @@ def image_reconstruction(imgs, positions, translations_list):
         abs_translations = {}
         minr=0
         minc=0
-        translations = np.uint16(np.round(trans_set))
-        drow = translations[0]
-        rr = translations[1]
-        dcol = translations[2]
-        rc = translations[3]
+        drow, rr, dcol, rc = np.uint16(np.round(trans_set))
         for row in np.arange(nrow):
             for col in np.arange(ncol):
                 abs_translations[f'{row}{col}'] = [int(row*(drow+rr)+col*rr), int(row*rc+col*(dcol+rc))]
