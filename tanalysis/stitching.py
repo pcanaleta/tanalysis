@@ -1,5 +1,10 @@
 import numpy as np
 from tqdm import tqdm
+try:
+    import cupy as cp # type: ignore
+    CUPY = True
+except:
+    CUPY=False
 ### Translation Computation ###
 def pcm(image1:np.ndarray, image2:np.ndarray):
     """
@@ -14,10 +19,13 @@ def pcm(image1:np.ndarray, image2:np.ndarray):
     """
     assert image1.ndim == image2.ndim == 2
     assert image1.shape == image2.shape
-    F1 = np.fft.fft2(image1)
-    F2 = np.fft.fft2(image2)
-    FC = F1 * np.conjugate(F2)
-    PCM = np.fft.ifft2(FC/np.abs(FC))
+    img1 = cp.array(image1)
+    img2 = cp.array(image2)
+    F1 = cp.fft.fft2(img1)
+    F2 = cp.fft.fft2(img2)
+    FC = F1 * cp.conjugate(F2)
+    PCM = cp.fft.ifft2(FC/cp.abs(FC))
+    PCM = cp.asnumpy(PCM)
     del FC,F1,F2
     return PCM.real.astype(np.float32)
 
@@ -31,9 +39,11 @@ def multiPeakMax(PCM:np.ndarray):
     Returns:
         tuple: array of n tuples (x,y,val) where x,y correspond to the peak location described in matrix indices
     """
-    row, col = np.unravel_index(np.argsort(np.ravel(PCM)), PCM.shape)
+    PCM = cp.array(PCM)
+    row, col = cp.unravel_index(cp.argsort(cp.ravel(PCM)), cp.shape(PCM))
     vals = PCM[row[::-1], col[::-1]]
-    return np.array((row[::-1], col[::-1], vals))
+    peaks = cp.array((row[::-1], col[::-1], vals))
+    return cp.asnumpy(peaks)
 
 def ncc(image1:np.ndarray, image2:np.ndarray):
     """
