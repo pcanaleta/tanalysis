@@ -4,9 +4,9 @@ try:
     import cupy as cp # type: ignore
     CUPY = True
 except:
-    CUPY=False
+    CUPY = False
 ### Translation Computation ###
-def pcm(image1:np.ndarray, image2:np.ndarray):
+def pcm(image1, image2):
     """
     This function performs the peak correlation matrix as described in MIST algorithms. Input images have to be the same size.
 
@@ -17,19 +17,22 @@ def pcm(image1:np.ndarray, image2:np.ndarray):
     Returns:
         PCM (ndArray): 2D peak correlation array with the same size as the original images
     """
-    assert image1.ndim == image2.ndim == 2
-    assert image1.shape == image2.shape
-    img1 = cp.array(image1)
-    img2 = cp.array(image2)
-    F1 = cp.fft.fft2(img1)
-    F2 = cp.fft.fft2(img2)
-    FC = F1 * cp.conjugate(F2)
-    PCM = cp.fft.ifft2(FC/cp.abs(FC))
-    PCM = cp.asnumpy(PCM)
-    del FC,F1,F2
-    return PCM.real.astype(np.float32)
+    if CUPY:
+        F1 = cp.fft.fft2(image1)
+        F2 = cp.fft.fft2(image2)
+        FC = F1 * cp.conjugate(F2)
+        PCM = cp.fft.ifft2(FC/cp.abs(FC))
+        PCM = cp.real(PCM)
+        PCM = cp.array(PCM, dtype=np.float32)
+    else:
+        F1 = np.fft.fft2(image1)
+        F2 = np.fft.fft2(image2)
+        FC = F1 * np.conjugate(F2)
+        PCM = np.fft.ifft2(FC/np.abs(FC))
+        PCM = np.float32(np.real(PCM))
+    return PCM
 
-def multiPeakMax(PCM:np.ndarray):
+def multiPeakMax(PCM):
     """
     This function finds the multiple discrete peaks in a pcm matrix
 
@@ -39,13 +42,17 @@ def multiPeakMax(PCM:np.ndarray):
     Returns:
         tuple: array of n tuples (x,y,val) where x,y correspond to the peak location described in matrix indices
     """
-    PCM = cp.array(PCM)
-    row, col = cp.unravel_index(cp.argsort(cp.ravel(PCM)), cp.shape(PCM))
-    vals = PCM[row[::-1], col[::-1]]
-    peaks = cp.array((row[::-1], col[::-1], vals))
-    return cp.asnumpy(peaks)
+    if CUPY:
+        row, col = cp.unravel_index(cp.argsort(cp.ravel(PCM)), cp.shape(PCM))
+        vals = PCM[row[::-1], col[::-1]]
+        peaks = cp.array((row[::-1], col[::-1], vals))
+    else:
+        row, col = np.unravel_index(np.argsort(np.ravel(PCM)), PCM.shape)
+        vals = PCM[row[::-1], col[::-1]]
+        peaks = np.array((row[::-1], col[::-1], vals))
+    return peaks
 
-def ncc(image1:np.ndarray, image2:np.ndarray):
+def ncc(image1, image2):
     """
     This function returns the normalized cross correlation coefficient between two arrays. The two arrays must have the same size
 
@@ -65,7 +72,7 @@ def ncc(image1:np.ndarray, image2:np.ndarray):
     np.seterr(divide='ignore', invalid='ignore')
     return n/d
 
-def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
+def extractOverlapSubregion(image, row:int, col:int):
     """
     This function extracts the overlapping region with another image given the coordinates where the overlapping begins
 
@@ -84,7 +91,7 @@ def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     rowend = int(max(0, min(row+H, H, key=int), key=int))
     return image[rowstart:rowend, colstart:colend]
 
-def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n=8):
+def interpretTranslation(image1, image2, rowin, colin, rowmin, rowmax, colmin, colmax, n=8):
     """
     This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, which will correspond to the translation between the two images
 
@@ -98,11 +105,14 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
     Returns:
         ndArray: tuple containing the ncc,x,y of the translation between image1 and image2
     """
-    assert image1.shape == image2.shape
-    _ncc = -np.inf
     x = 0
     y = 0
-    H,W = image1.shape
+    if CUPY:
+        _ncc = -cp.inf
+        H,W = cp.shape(image1)
+    else:
+        _ncc = -np.inf
+        H,W = np.shape(image1)
 
     rowmagss = [rowin, H-rowin]
     colmagss = [colin, W-colin]
@@ -112,7 +122,10 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
             for rowsign in [-1,1]:
                 for colsign in [-1,1]:
                     _poss.append([rowmag*rowsign, colmag*colsign])
-    poss = np.array(_poss)
+    if CUPY:
+        poss = cp.array(_poss)
+    else:
+        poss = np.array(_poss)
     valid_ind = (
         (rowmin < poss[:, 0, :])
         & (poss[:, 0, :] < rowmax)
@@ -120,10 +133,15 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
         & (colmin < poss[:, 1, :])
         & (poss[:, 1, :] < colmax)
         & (poss[:, 1, :] != 0)
-    )  
-    valid_ind = np.any(valid_ind, axis=0)
+    )
+    if CUPY:
+        valid_ind = cp.any(valid_ind, axis=0)
+        inds = cp.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]
+    else:
+        valid_ind = np.any(valid_ind, axis=0)
+        np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]
 
-    for pos in np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]:
+    for pos in inds:
         for rowval, colval in pos:
             if (colmin <= colval) and (colval <= colmax) and (rowmin <= rowval) and (rowval <= rowmax):
                 subI1 = extractOverlapSubregion(image1, rowval, colval)
@@ -134,9 +152,13 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
                     x = int(rowval)
                     y = int(colval)
     del subI1, subI2
-    return np.asarray([_ncc,x,y])
+    if CUPY:
+        max_peak = cp.asarray([_ncc,x,y])
+    else:
+        max_peak = np.asarray([_ncc,x,y])
+    return max_peak
 
-def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
+def pciam(image1, image2, n=8):
     """
     This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes the coordinates of the peaks for each peak
 
@@ -147,10 +169,19 @@ def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
     Returns:
         ndArray: tuple containing the peak with the max ncc value (ncc, x, y)
     """
+    assert image1.ndim == image2.ndim == 2
+    assert image1.shape == image2.shape
+    if CUPY:
+        image1 = cp.asarray(image1)
+        image2 = cp.asarray(image2)
+        H, W = cp.shape(image1)
+    else:
+        H, W = np.shape(image1)
     PCM = pcm(image1, image2)
-    H, W = np.shape(image1)
     rowin, colin, _ = multiPeakMax(PCM)
     max_peak = interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n)
+    if CUPY:
+        max_peak = cp.asnumpy(max_peak)
     return max_peak
 
 def make_grid(im_list, positions):
@@ -275,11 +306,11 @@ def image_reconstruction(imgs, positions, translations_list):
     res_img_list = []
     T,M,D,H,W = imgs[0].shape
     del imgs
-    for trans_set, grid in zip(translations_list, grid_list):
+    for grid in grid_list:
         abs_translations = {}
         minr=0
         minc=0
-        translations = np.uint16(np.round(trans_set))
+        translations = np.int16(translations_list)
         drow = translations[0]
         rr = translations[1]
         dcol = translations[2]
