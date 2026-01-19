@@ -50,13 +50,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     #List all given files
     file_list = []
     if os.path.isfile(dirname):
-        file_list.append(dirname)
-    elif os.path.isdir(dirname):
-        if len(os.listdir(dirname)) == 0:
-            raise ValueError('ERROR: submitted directory is empty')
-        else:
-            for fname in os.listdir(dirname):
-                file_list.append(os.path.join(dirname,fname))
+        file_list.append(dirname)              
     else:
         raise ValueError('ERROR: no directory or file submitted')
     
@@ -74,7 +68,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
         #For lif files
         elif ext==".lif":
             if not READLIF:
-                raise ImportError('ERROR: cannot import liffile, please use: pip install -U readlif[all]')
+                print('ERROR: cannot import liffile, please use: pip install -U readlif[all]')
             else:
                 for i in range(0,10):
                     try:
@@ -88,7 +82,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
                     if tiles:
                         im_info['mosaic_position'] = image_0.info['mosaic_position']
         else:
-            raise ValueError('ERROR: submited file does not have a supported extension (.tif, .tiff, .lif)')
+            continue
 
     return im_list, im_name, im_info
 
