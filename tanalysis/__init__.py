@@ -1,10 +1,9 @@
 
 ####
 
-# Add requirements.txt
-# try doctest for verifying functions
+# Config poetry
 # sphinx for documentation
-# fastAPI
-# mypy
-# docker
-# PEP 8 - Style guide
+
+# .venv separados de proyecto
+# poetry update per actualitzar tots els paquets
+# poetry install
