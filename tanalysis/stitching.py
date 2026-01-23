@@ -1,5 +1,5 @@
 import numpy as np
-from tqdm import tqdm
+from tqdm import tqdm # type:ignore
 try:
     import cupy as cp # type: ignore
     CUPY = True
