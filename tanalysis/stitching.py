@@ -6,7 +6,7 @@ try:
 except:
     CUPY = False
 ### Translation Computation ###
-def pcm(image1, image2):
+def pcm(image1:np.ndarray, image2:np.ndarray):
     """
     This function performs the peak correlation matrix as described in MIST algorithms. Input images have to be the same size.
 
@@ -32,7 +32,7 @@ def pcm(image1, image2):
         PCM = np.float32(np.real(PCM))
     return PCM
 
-def multiPeakMax(PCM):
+def multiPeakMax(PCM:np.ndarray):
     """
     This function finds the multiple discrete peaks in a pcm matrix
 
@@ -52,7 +52,7 @@ def multiPeakMax(PCM):
         peaks = np.array((row[::-1], col[::-1], vals))
     return peaks
 
-def ncc(image1, image2):
+def ncc(image1:np.ndarray, image2:np.ndarray):
     """
     This function returns the normalized cross correlation coefficient between two arrays. The two arrays must have the same size
 
@@ -72,7 +72,7 @@ def ncc(image1, image2):
     np.seterr(divide='ignore', invalid='ignore')
     return n/d
 
-def extractOverlapSubregion(image, row:int, col:int):
+def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     """
     This function extracts the overlapping region with another image given the coordinates where the overlapping begins
 
@@ -91,16 +91,17 @@ def extractOverlapSubregion(image, row:int, col:int):
     rowend = int(max(0, min(row+H, H, key=int), key=int))
     return image[rowstart:rowend, colstart:colend]
 
-def interpretTranslation(image1, image2, rowin, colin, rowmin, rowmax, colmin, colmax, n=8):
+def interpretTranslation(image1:np.ndarray, image2:np.ndarray, rowin:int, colin:int, n:int=8):
     """
-    This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, which will correspond to the translation between the two images
+    This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, 
+    which will correspond to the translation between the two images
 
     Args:
         image1 (ndArray): 2D image array
         image2 (ndArray): 2D image array
-        xin (int): row index coordinate
-        yin (int): column index coordinate 
-        perc_threshold (int): maximum accepted percentage of overlapping between the two images
+        rowin (int): row where the max peak is located
+        colin (int): col where the max peak is located
+        n (int): number of peaks to verify
 
     Returns:
         ndArray: tuple containing the ncc,x,y of the translation between image1 and image2
@@ -127,11 +128,11 @@ def interpretTranslation(image1, image2, rowin, colin, rowmin, rowmax, colmin, c
     else:
         poss = np.array(_poss)
     valid_ind = (
-        (rowmin < poss[:, 0, :])
-        & (poss[:, 0, :] < rowmax)
+        (-H < poss[:, 0, :])
+        & (poss[:, 0, :] < H)
         & (poss[:, 0, :] != 0)
-        & (colmin < poss[:, 1, :])
-        & (poss[:, 1, :] < colmax)
+        & (-W < poss[:, 1, :])
+        & (poss[:, 1, :] < W)
         & (poss[:, 1, :] != 0)
     )
     if CUPY:
@@ -143,7 +144,7 @@ def interpretTranslation(image1, image2, rowin, colin, rowmin, rowmax, colmin, c
 
     for pos in inds:
         for rowval, colval in pos:
-            if (colmin <= colval) and (colval <= colmax) and (rowmin <= rowval) and (rowval <= rowmax):
+            if (-W <= colval) and (colval <= W) and (-H <= rowval) and (rowval <= H):
                 subI1 = extractOverlapSubregion(image1, rowval, colval)
                 subI2 = extractOverlapSubregion(image2, -rowval, -colval)
                 ncc_val = ncc(subI1, subI2)
@@ -158,13 +159,15 @@ def interpretTranslation(image1, image2, rowin, colin, rowmin, rowmax, colmin, c
         max_peak = np.asarray([_ncc,x,y])
     return max_peak
 
-def pciam(image1, image2, n=8):
+def pciam(image1:np.ndarray, image2:np.ndarray, n:int=8):
     """
-    This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes the coordinates of the peaks for each peak
+    This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes 
+    the coordinates of the peaks for each peak
 
     Args:
         image1 (ndArray): 2D image array
         image2 (ndArray): 2D image array
+        n (int): number of peaks to verify
 
     Returns:
         ndArray: tuple containing the peak with the max ncc value (ncc, x, y)
@@ -179,12 +182,12 @@ def pciam(image1, image2, n=8):
         H, W = np.shape(image1)
     PCM = pcm(image1, image2)
     rowin, colin, _ = multiPeakMax(PCM)
-    max_peak = interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n)
+    max_peak = interpretTranslation(image1, image2, rowin, colin, n)
     if CUPY:
         max_peak = cp.asnumpy(max_peak)
     return max_peak
 
-def make_grid(im_list, positions):
+def make_grid(im_list:list, positions:tuple):
     '''
     This function converts the resulting image list from the imread function to a list of dictionaries where each dictionary corresponds to a timeframe. 
     The keys in the dictionary correspond to the row/col position of the tile assigned to the key
@@ -211,14 +214,17 @@ def make_grid(im_list, positions):
     del im_list
     return grid_list, nrow, ncol
 
-def translationComputation(imgs, positions, n=8, n_frames=20):
+def translationComputation(imgs:list, positions:tuple, n:int=8, n_frames:int=20):
     """
-    This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image. The function calculates the translation values drow, rr, dcol, rc which correspond to: vertical translation, error in vertical translation,
-    horizontal translation, error in horizontal translation.
+    This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image. The function calculates the 
+    translation values drow, rr, dcol, rc which correspond to: vertical translation, error in vertical translation, horizontal translation, 
+    error in horizontal translation.
 
     Args:
         imgs (ndArray): array of tiles with shape (t,m,z,x,y)
         positions (list): list of tuples containing the position of the tiles
+        n (int): number of peaks to verify
+        n_frames (int): number of frames where translation vectors will be calculated
 
     Returns:
         translations_list: list of translation values
@@ -289,10 +295,10 @@ def translationComputation(imgs, positions, n=8, n_frames=20):
     del grid_list
     return translations_list
 
-def image_reconstruction(imgs, positions, translations_list):
+def image_reconstruction(imgs:list, positions:tuple, translations_list:list):
     '''
-    This function reconstructs the mosaic image using translation vectors for the tiles. To determine the translation vectors, translationComputation function is used. The reconstructed image is formed by overlapping the stitched tiles
-    and averaging the overlapping parts, resulting in a stitched image.
+    This function reconstructs the mosaic image using translation vectors for the tiles. To determine the translation vectors, translationComputation 
+    function is used. The reconstructed image is formed by overlapping the stitched tiles and averaging the overlapping parts, resulting in a stitched image.
 
     Args:
         imgs: list of arrays of the images to stitch
