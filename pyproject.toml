@@ -15,6 +15,7 @@ dependencies = [
     "cellpose[all] (>=4.0.8,<5.0.0)",
     "liffile (>=2026.1.22,<2027.0.0)",
     "readlif (>=0.6.6,<0.7.0)",
+    "scikit-image (>=0.26.0,<0.27.0)",
 ]
 
 
