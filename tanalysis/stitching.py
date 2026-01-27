@@ -295,7 +295,7 @@ def translationComputation(imgs:list, positions:tuple, n:int=8, n_frames:int=20)
     del grid_list
     return translations_list
 
-def image_reconstruction(imgs:list, positions:tuple, translations_list:list):
+def image_reconstruction(imgs, positions:tuple, translations_list):
     '''
     This function reconstructs the mosaic image using translation vectors for the tiles. To determine the translation vectors, translationComputation 
     function is used. The reconstructed image is formed by overlapping the stitched tiles and averaging the overlapping parts, resulting in a stitched image.
