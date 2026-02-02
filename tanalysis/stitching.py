@@ -140,7 +140,7 @@ def interpretTranslation(image1:np.ndarray, image2:np.ndarray, rowin:int, colin:
         inds = cp.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]
     else:
         valid_ind = np.any(valid_ind, axis=0)
-        np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]
+        inds = np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]
 
     for pos in inds:
         for rowval, colval in pos:
