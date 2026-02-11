@@ -3,6 +3,9 @@ import tifffile as tiff
 import numpy as np
 import shutil
 import liffile as lif
+import cupy as cp
+from cupyx.scipy import ndimage
+from skimage import measure, morphology
 
 try:
     from readlif.reader import LifFile # type: ignore
@@ -171,5 +174,82 @@ def concatenate(dirname, remove_original=False):
     
     return
 
-def detect_spots(images, radius):
-    return
+def LoG(sigma_x:float, sigma_y:float, sigma_z:float):
+    '''
+    The function calculates the laplacian of the gaussian of the image in order to find the borders of the objects present in the photo.
+    It only accepts 3D images (for now).
+    
+    Params:
+        sigma_x (float): float value for deviation in x axis 
+        sigma_y (float): float value for deviation in y axis 
+        sigma_z (float): float value for deviation in z axis 
+    '''
+    n = 7
+    z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
+    z_filter = cp.exp(-(z*z/(2*sigma_z**2)))
+    y_filter = cp.exp(-(y*y/(2*sigma_y**2)))
+    x_filter = cp.exp(-(x*x/(2*sigma_x**2)))
+    final_filter = (1/(sigma_x*sigma_y*sigma_z*(2*np.pi)**(3/2)))*((1-x*x/(sigma_x**2))/(sigma_x**2)+(1-y*y/(sigma_y**2))/(sigma_y**2)+(1-z*z/(sigma_z**2))/(sigma_z**2))*(z_filter*x_filter*y_filter)
+    return final_filter
+
+def LoG_convolve(img:np.ndarray, sigma_x:float, sigma_y:float, sigma_z:float):
+    '''
+    Docstring for LoG_convolve
+    
+    :param img: Description
+    :param sigma_x: Description
+    :param sigma_y: Description
+    :param sigma_z: Description
+    '''
+    filter_log = LoG(sigma_x, sigma_y, sigma_z)
+    image = ndimage.convolve(img, filter_log)
+    image = cp.square(image)
+    return cp.asarray(image)
+
+def fit_gaussian(sigma_x:float, sigma_y:float, sigma_z:float):
+    '''
+    Docstring for fit_gaussian
+    
+    :param sigma_x: Description
+    :param sigma_y: Description
+    :param sigma_z: Description
+    '''
+    n = 7
+    z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
+    z_filter = cp.exp(-(z*z/(2*sigma_z**2)))
+    y_filter = cp.exp(-(y*y/(2*sigma_y**2)))
+    x_filter = cp.exp(-(x*x/(2*sigma_x**2)))
+    final_filter = (x_filter*y_filter*z_filter)/(sigma_x*sigma_y*sigma_z*(2*np.pi)**(3/2))
+    return final_filter
+
+def label_cells(image:np.ndarray, sigmas:list, th:float):
+    img = cp.array(np.double(image))
+
+    gaussian = fit_gaussian(*sigmas)
+    img = ndimage.convolve(img, gaussian)
+    th1 = cp.max(img)*th
+    img_th1 = img>th1
+
+    img = LoG_convolve(img, *sigmas)
+    th2 = cp.max(img)*th
+    img_th2 = img>th2
+
+    img_th1 = cp.asnumpy(img_th1)
+    img_th2 = cp.asnumpy(img_th2)
+
+    img = img_th1 ^ img_th2
+    img = morphology.dilation(img)
+    img = morphology.erosion(img)
+    img = morphology.remove_small_holes(img)
+    img_r1 = morphology.remove_small_objects(img)
+
+    img = cp.asarray(np.double(img_r1))
+    img = LoG_convolve(img, *sigmas)
+    img = cp.asnumpy(img)
+    th3 = np.max(img)*th
+    img_th3 = img>th3
+    img_r2 = img_r1 ^ img_th3
+    img = morphology.erosion(img_r2)
+    img = morphology.remove_small_objects(img)
+    img = measure.label(img)
+    return img
