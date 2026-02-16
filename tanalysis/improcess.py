@@ -194,12 +194,14 @@ def LoG(sigma_x:float, sigma_y:float, sigma_z:float):
 
 def LoG_convolve(img:np.ndarray, sigma_x:float, sigma_y:float, sigma_z:float):
     '''
-    Docstring for LoG_convolve
+    The function creates and convolves a kernel to the image in order to apply the Laplacian of Gaussian filter to the image. Borders of the objects in the image 
+    are marked after applying the kernel.
     
-    :param img: Description
-    :param sigma_x: Description
-    :param sigma_y: Description
-    :param sigma_z: Description
+    Params:
+        img (np.ndarray): original image where the kernel will be convolved
+        sigma_x (float): value for deviation in x axis
+        sigma_y (float): value for deviation in y axis
+        sigma_z (float): value for deviation in z axis
     '''
     filter_log = LoG(sigma_x, sigma_y, sigma_z)
     image = ndimage.convolve(img, filter_log)
@@ -208,11 +210,12 @@ def LoG_convolve(img:np.ndarray, sigma_x:float, sigma_y:float, sigma_z:float):
 
 def fit_gaussian(sigma_x:float, sigma_y:float, sigma_z:float):
     '''
-    Docstring for fit_gaussian
-    
-    :param sigma_x: Description
-    :param sigma_y: Description
-    :param sigma_z: Description
+    This function creates a Gaussian kernel using the given sigma values.
+
+    Params:
+        sigma_x (float): value for deviation in x axis
+        sigma_y (float): value for deviation in y axis
+        sigma_z (float): value for deviation in z axis    
     '''
     n = 7
     z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
@@ -223,6 +226,14 @@ def fit_gaussian(sigma_x:float, sigma_y:float, sigma_z:float):
     return final_filter
 
 def label_cells(image:np.ndarray, sigmas:list, th:float):
+    '''
+    This function will create a labeled image where each detected cell will have a different gray level value assigned.
+    
+    Params:
+        image (np.ndarray): 3D image where cells will be labeled
+        sigmas (list[float]): list of float sigma values
+        th (float): threshold value used in the process. It depends on the intensity of the image
+    '''
     img = cp.array(np.double(image))
 
     gaussian = fit_gaussian(*sigmas)
