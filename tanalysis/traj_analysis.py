@@ -67,9 +67,9 @@ def get_traj(dirname:str):
     Args:
         dirname (string): path to the Excel file
 
-    Returns.
-        list: list of track arrays
-        list: list of file names  
+    Returns:
+        tracks: pandas dataframe containing the position information from each track
+        name: name of the track
     '''
     try:
         fname = os.path.split(dirname)
@@ -88,6 +88,10 @@ def filter_traj(dirname:str, filter_values:dict):
     Args:
         dirname (str): path to the original tracks
         filter_values (dict): dict containing the filter values. Possible filter parameters are: ['track_duration', 'total_distance', 'mean_velocity', 'minmax_velocity']. Filter values are composed of a min and a max value.
+
+    Returns:
+        tracks: pandas dataframe containing the position information from each track
+        name: name of the track
     '''
     df, name = get_traj(dirname)
     valid_ids = []
@@ -114,8 +118,8 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
         filter_values (dict): dict containing the filter values in case of performing the filter. Defaults to None
 
     Returns:
-        list: list of arrays containing the cropped tracks, all arrays will have the same length
-        list: list of names of the excel files
+        tracks: pandas dataframe containing the position information from each track
+        name: name of the track
     '''
     if filter_tracks==True:
         tracks, name = filter_traj(dirname, filter_values=filter_values)
@@ -127,7 +131,8 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
         t_len = len(tracks.loc[id])
         if t_len<min_len:
             min_len = t_len
-            
+        # Crop track and create a new df or crop the same df if possible
+
     crop_tracks = []
     for file in tracks:
         ids = np.unique(file[:,0], return_index=False)
