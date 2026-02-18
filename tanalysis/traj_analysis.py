@@ -65,27 +65,21 @@ def get_traj(dirname:str):
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        dirname (string): path to the folder containing the Excel files
+        dirname (string): path to the Excel file
 
     Returns.
         list: list of track arrays
         list: list of file names  
     '''
-    tracks = []
-    names = []
-    for fname in os.listdir(dirname):
-        try:
-            ext=os.path.splitext(fname)[-1].lower()
-            df=pd.read_excel(os.path.join(dirname,fname))
-            np_df=df.to_numpy()
-            names.append(fname.replace(ext,''))
-            tracks.append(np_df)
-        except:
-            if os.path.isdir(os.path.join(dirname,fname)):
-                continue
-            else:
-                print(f'Could not read: {os.path.join(dirname,fname)}')
-    return tracks, names
+    try:
+        fname = os.path.split(dirname)
+        ext = os.path.splitext(fname)[-1].lower()
+        tracks = pd.read_excel(dirname)
+        name = fname.replace(ext,'')
+    except:         
+        print(f'Could not read: {os.path.join(dirname,fname)}')
+
+    return tracks, name
 
 def filter_traj(dirname:str, filter_values:dict):
     '''
@@ -95,31 +89,20 @@ def filter_traj(dirname:str, filter_values:dict):
         dirname (str): path to the original tracks
         filter_values (dict): dict containing the filter values. Possible filter parameters are: ['track_duration', 'total_distance', 'mean_velocity', 'minmax_velocity']. Filter values are composed of a min and a max value.
     '''
-    unfiltered_tracks, names = get_traj(dirname)
-    tracks = []
-    for file in unfiltered_tracks:
-        ids,index = np.unique(file[:,0], return_index=True)
-        valid_tracks = []
-        for track_id in ids:
-            try:
-                track = file[index[int(track_id)]:index[int(track_id)+1]]
-            except:
-                track = file[index[int(track_id)]:]
-            #Track parameters
-            track_duration = track[-1,1]-track[0,1]
-            total_distance = np.sum(np.linalg.norm(np.diff(track[:,2:],axis=0),axis=-1))
-            track_velocity = np.linalg.norm(np.diff(track[:,2:], axis=0),axis=-1)/(np.diff(track[:,1], axis=0))
-            mean_velocity = np.mean(track_velocity, axis=-1)
-            max_velocity = np.max(track_velocity)
-            min_velocity = np.min(track_velocity)
-            comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], filter_values['total_distance'][0]<=total_distance<=filter_values['total_distance'][1], filter_values['mean_velocity'][0]<=mean_velocity<=filter_values['mean_velocity'][1], filter_values['minmax_velocity'][1]>=max_velocity, filter_values['minmax_velocity'][0]<=min_velocity]
-            if all(comparison):
-                for timestamp in np.arange(len(track)):
-                    valid_tracks.append(track[timestamp,:])
-            else:
-                continue
-        tracks.append(np.asarray(valid_tracks))
-    return tracks, names
+    df, name = get_traj(dirname)
+    valid_ids = []
+    for id in pd.unique(df.index):
+        total_distance = np.sum(np.linalg.norm(np.diff(df.loc[id][['x','y','z']], axis=0), axis=-1))
+        mean_speed = np.mean(np.linalg.norm(np.diff(df.loc[id][['x','y','z']], axis=0), axis=-1)/(np.diff(df.loc[id][['time']], axis=0)))
+        track_duration = np.max(df.loc[id][['time']])-np.min(df.loc[id][['time']])
+        # Compare given filter values to the current track and store only the valid ids
+        comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], filter_values['total_distance'][0]<=total_distance<=filter_values['total_distance'][1], filter_values['mean_velocity'][0]<=mean_speed<=filter_values['mean_velocity'][1]]
+        if all(comparison):
+            valid_ids.append(id)
+        else:
+            continue
+    filtered_tracks = df.loc[valid_ids]
+    return filtered_tracks, name
 
 def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
     '''
@@ -135,10 +118,16 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
         list: list of names of the excel files
     '''
     if filter_tracks==True:
-        tracks, names = filter_traj(dirname, filter_values=filter_values)
+        tracks, name = filter_traj(dirname, filter_values=filter_values)
     else:
-        tracks, names = get_traj(dirname)
+        tracks, name = get_traj(dirname)
 
+    min_len = np.inf
+    for id in pd.unique(tracks.index):
+        t_len = len(tracks.loc[id])
+        if t_len<min_len:
+            min_len = t_len
+            
     crop_tracks = []
     for file in tracks:
         ids = np.unique(file[:,0], return_index=False)
@@ -157,7 +146,7 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
             crop_track.append(traj[:int(min_len),:])
         crop_tracks.append(np.asarray(crop_track))
     tracks = crop_tracks
-    return tracks, names
+    return tracks, name
 
 def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
@@ -759,20 +748,18 @@ def sim_APRW(dirname:str, tracks:list[np.ndarray], Nmax:int=50, repeats:int=30, 
         n = n+1  
     return
 
-def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calculation_tlag:int, savedir:str="", save_results:bool=True):
+def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
     For a given time lag, it calculates all displacements and distributes them along the given number of bins, up to the maximum displacement assigned.
 
     Args:
-        dirname (string): path to the folder containing the Excel files
-        dt (int): trajectory time step size
-        tlag (int): time lag where probability density function of the displacement will be calculated.
-        dmax (float): maximum distance cells can travel in the selected time lag.
-        binn (int): number of bins between 0 and dmax.
-        tunit (string): Defaults to min. Indicates the dt and tlag unit. It will be used to save in the file name. 
-        save_xlsx (bool): Defults to True. Determines if an Excel file with the results of the function will be saved.
-        savedir (string): Defaults to None. Path to the folder where results will be saved. If set to None, a folder will be created in the directory containing the tracks.
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        tlag (int): value of the timelag that will be used in the PDF calculation
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
 
     returns:
         list: list of lists for each file. Each file list corresponds to two arrays, the first one for the histogram data and the second one for the bins.
@@ -786,7 +773,7 @@ def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calcul
         file_d_euc = []
         #calculate PDF_dR for each track in the file
         for track in file:
-            d_euc = np.linalg.norm(track[calculation_tlag:,2:]-track[:-calculation_tlag,2:], axis=-1)
+            d_euc = np.linalg.norm(track[tlag:,2:]-track[:-tlag,2:], axis=-1)
             file_d_euc.append(np.mean(d_euc))
             all_d_euc.append(np.mean(d_euc))
         tracks_d_euc.append(np.array(all_d_euc))
@@ -806,30 +793,22 @@ def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, calcul
             name = name+1
     return
 
-######################################
-def PDF_dtheta(dirname, dt, tlag, binn=9, tunit='min', save_xlsx=True, savedir=None):
+def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density funtion (PDF) of the angle. 
     Given a time lag, the function calculates the angle turned (between 0 and 180º) between the current position and the position one time lag after.
 
     Args:
-        dirname (string): path to the folder containing the Excel files
-        dt (int): trajectory time step size
-        tlag (int): time lag where probability density function of the turning angle will be calculated.
-        binn (int): number of bins between 0 and 180.
-        tunit (string): Defaults to min. Indicates the dt and tlag unit. It will be used to save in the file name. 
-        save_xlsx (bool): Defults to True. Determines if an Excel file with the results of the function will be saved.
-        savedir (string): Defaults to None. Path to the folder where results will be saved. If set to None, a folder will be created in the directory containing the tracks.
+        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
+        names (list[str]): list of names of the track conditions
+        timelapse_units (str): time units of the tracks (s, min, h)
+        tlag (int): value of the timelag that will be used in the PDF calculation
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
     '''
-    all_files, name_list = get_traj(dirname)
+    if not os.path.exists(savedir):
+        os.makedirs(os.path.abspath(savedir))
 
-    if os.path.isfile(dirname):
-        raise ValueError('Error: please indicate the path to the folder where results will be saved.')
-
-    if savedir==None:
-        if not os.path.exists(os.path.abspath(fr'{dirname}\Results')):
-            os.makedirs(os.path.abspath(fr'{dirname}\Results'))
-        savedir = os.path.abspath(fr'{dirname}\Results')
 
     all_files_PDF_dtheta = []
     bin_distr = np.linspace(0, 180, binn)
@@ -859,6 +838,7 @@ def PDF_dtheta(dirname, dt, tlag, binn=9, tunit='min', save_xlsx=True, savedir=N
 
     return
 
+################################################
 def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
     '''
     This function is used to determine the polarity of the velocity. It detrmines the primary axis and rotates the 

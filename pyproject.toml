@@ -17,6 +17,7 @@ dependencies = [
     "readlif (>=0.6.6,<0.7.0)",
     "scikit-image (>=0.26.0,<0.27.0)",
     "ipywidgets (>=8.1.8,<9.0.0)",
+    "openpyxl (>=3.1.5,<4.0.0)",
 ]
 
 
