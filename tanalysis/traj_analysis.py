@@ -75,6 +75,11 @@ def get_traj(dirname:str):
         fname = os.path.split(dirname)
         ext = os.path.splitext(fname)[-1].lower()
         tracks = pd.read_excel(dirname)
+        tracks['frame'] = np.int8(tracks['time']/np.min(np.uint32(np.diff(tracks['time']))))
+        for id in pd.unique(tracks['id']):
+            min_val = np.min(tracks.loc[tracks['id']==id, 'frame'])
+            tracks.loc[tracks['id']==id, 'frame'] -= min_val
+        tracks = tracks.set_index(['id', 'frame'])    
         name = fname.replace(ext,'')
     except:         
         print(f'Could not read: {os.path.join(dirname,fname)}')
