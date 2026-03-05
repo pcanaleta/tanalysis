@@ -71,19 +71,21 @@ def get_traj(dirname:str):
         tracks: pandas dataframe containing the position information from each track
         name: name of the track
     '''
-    try:
-        fname = os.path.split(dirname)
-        ext = os.path.splitext(fname)[-1].lower()
-        tracks = pd.read_excel(dirname)
-        tracks['frame'] = np.int8(tracks['time']/np.min(np.uint32(np.diff(tracks['time']))))
-        for id in pd.unique(tracks['id']):
-            min_val = np.min(tracks.loc[tracks['id']==id, 'frame'])
-            tracks.loc[tracks['id']==id, 'frame'] -= min_val
-        tracks = tracks.set_index(['id', 'frame'])    
-        name = fname.replace(ext,'')
-    except:         
-        print(f'Could not read: {os.path.join(dirname,fname)}')
+    fname = os.path.split(dirname)[-1]
+    ext = os.path.splitext(fname)[-1].lower()
 
+    # Read excel documents
+    try:
+        tracks = pd.read_excel(dirname)
+    except:         
+        print(f'Could not read: {dirname}')
+    
+    tracks['frame'] = np.int8(tracks['time']/np.min(np.uint32(np.diff(tracks['time'])))) # Add frame column in dataframe based on time column
+    for id in pd.unique(tracks['id']):
+        min_val = np.min(tracks.loc[tracks['id']==id, 'frame'])
+        tracks.loc[tracks['id']==id, 'frame'] -= min_val # Set starting frame to 0 in all id
+    tracks = tracks.set_index(['id', 'frame'])    
+    name = fname.replace(ext,'')
     return tracks, name
 
 def filter_traj(dirname:str, filter_values:dict):
@@ -100,10 +102,11 @@ def filter_traj(dirname:str, filter_values:dict):
     '''
     df, name = get_traj(dirname)
     valid_ids = []
-    for id in pd.unique(df.index):
-        total_distance = np.sum(np.linalg.norm(np.diff(df.loc[id][['x','y','z']], axis=0), axis=-1))
-        mean_speed = np.mean(np.linalg.norm(np.diff(df.loc[id][['x','y','z']], axis=0), axis=-1)/(np.diff(df.loc[id][['time']], axis=0)))
-        track_duration = np.max(df.loc[id][['time']])-np.min(df.loc[id][['time']])
+    for id in np.unique(df.index.get_level_values(0)):
+        ctrack = df.loc[id,:]
+        total_distance = np.sum(np.linalg.norm(np.diff(ctrack[['x','y','z']], axis=0), axis=-1))
+        mean_speed = np.mean(np.linalg.norm(np.diff(ctrack[['x','y','z']], axis=0), axis=-1)/(np.diff(ctrack[['time']], axis=0)))
+        track_duration = np.max(ctrack[['time']])-np.min(ctrack[['time']])
         # Compare given filter values to the current track and store only the valid ids
         comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], filter_values['total_distance'][0]<=total_distance<=filter_values['total_distance'][1], filter_values['mean_velocity'][0]<=mean_speed<=filter_values['mean_velocity'][1]]
         if all(comparison):
@@ -132,30 +135,14 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
         tracks, name = get_traj(dirname)
 
     min_len = np.inf
-    for id in pd.unique(tracks.index):
-        t_len = len(tracks.loc[id])
+    # Find the length of the shortest track
+    for id in np.unique(tracks.index.get_level_values(0)):
+        t_len = tracks.loc[id].index[-1]
         if t_len<min_len:
             min_len = t_len
-        # Crop track and create a new df or crop the same df if possible
-
-    crop_tracks = []
-    for file in tracks:
-        ids = np.unique(file[:,0], return_index=False)
-        min_len = np.inf
-        track_list = []
-        crop_track = []
-        for track_id in ids:
-            track = []
-            for j in range(0,len(file)):
-                if file[j,0]==track_id:
-                    track.append(file[j,:])
-            if len(track)<min_len:
-                min_len=len(track)
-            track_list.append(np.asarray(track))
-        for traj in track_list:
-            crop_track.append(traj[:int(min_len),:])
-        crop_tracks.append(np.asarray(crop_track))
-    tracks = crop_tracks
+    # Reindex the dataframe to crop all tracks to the same length and fill empty spaces
+    iterables = pd.MultiIndex.from_product([np.arange(min_len+1), np.unique(tracks.index.get_level_values(0))])
+    tracks = tracks.reindex(index=iterables)
     return tracks, name
 
 def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
