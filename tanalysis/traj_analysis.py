@@ -141,11 +141,11 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
         if t_len<min_len:
             min_len = t_len
     # Reindex the dataframe to crop all tracks to the same length and fill empty spaces
-    iterables = pd.MultiIndex.from_product([np.arange(min_len+1), np.unique(tracks.index.get_level_values(0))])
+    iterables = pd.MultiIndex.from_product([np.unique(tracks.index.get_level_values(0)), np.arange(min_len+1)])
     tracks = tracks.reindex(index=iterables)
     return tracks, name
 
-def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
+def velocity(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function is used to calculate the velocity of the cells. It performs the mean between the velocities of all tracks and generates a file containing the velocity for each time frame.
 
@@ -159,68 +159,48 @@ def velocity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, save
     Returns:
         list: list of mean speeds of the tracks
     '''    
-    name = 0
-    inst_speeds = []
-    speed_means = []
-    for file in tracks:
-        file_velocity = []
-        file_vels = []
-        time = np.linspace(1, len(file[0])-1, len(file[0])-1)
-        #calculate velocity for each track in the file
-        track_count=0
-        means = np.zeros((len(file), 5))
-        std = np.zeros((len(file), 5))
-        median = np.zeros((len(file), 5))
-        max = np.zeros((len(file), 5))
-        min = np.zeros((len(file), 5))
-        for track in file:
-            xyz = track[:,2:]
-            ids = track[1:,0]
-            dxyz = np.diff(xyz, axis=0)
-            dt = np.diff(track[:,1], axis=0)
-            vxyz = np.transpose(np.transpose(dxyz)/(dt))
-            dt_value=np.min(dt)
-            absvxyz = abs(vxyz)
-            vr = np.sqrt(vxyz[:,0]**2+vxyz[:,1]**2+vxyz[:,2]**2)
-            v = np.array([vr, vxyz[:,0], vxyz[:,1], vxyz[:,2]])
-            absv = np.array([vr, absvxyz[:,0], absvxyz[:,1], absvxyz[:,2]])
-            #Determine parameters of interest
-            track_id = np.min(ids)
-            means[track_count,:] = np.array([int(track_id), *np.mean(absv, axis=-1)])
-            std[track_count,:] = np.array([int(track_id), *np.std(absv, axis=-1)])
-            median[track_count,:] = np.array([int(track_id), *np.median(absv, axis=-1)])
-            max[track_count,:] = np.array([int(track_id), *np.max(absv, axis=-1)])
-            min[track_count,:] = np.array([int(track_id), *np.min(absv, axis=-1)])
+    v_file = []
+    v_params_file = []
+    ids = np.unique(tracks.index.get_level_values(0))
+    for id in ids:
+        track = tracks.loc[id]
+        dtrack = np.diff(track, axis=0)
+        dt = np.unique(dtrack[:,0])[0]
+        vtrack = dtrack[:,1:]/dt
+        vr = np.linalg.norm(vtrack, axis=-1)
+        v = np.array([vr, vtrack[:,0], vtrack[:,1], vtrack[:,2]]).T
+        v_params = np.array([id, 
+                             *np.nanmean(v, axis=0), 
+                             *np.nanstd(v, axis=0), 
+                             *np.nanmedian(v, axis=0),
+                             *np.nanmax(np.abs(v), axis=0), 
+                             *np.nanmin(np.abs(v), axis=0)])
+        final_v = []
+        f = 1
+        for frame in v:
+            final_v.append(np.asarray([id, f*dt, *frame]))
+            f+=1
+        v_file.append(final_v)
+        v_params_file.append(v_params)
 
-            file_velocity.append(np.transpose(v))
-            vels = np.array([track[1:,0], time, vr, vxyz[:,0], vxyz[:,1], vxyz[:,2]])
-            file_vels.append(np.transpose(vels))
-            track_count+=1
-
-        all_vels = np.asarray(file_vels)
-        velocities = np.reshape(all_vels, (all_vels.shape[0]*all_vels.shape[1], 6))
-        inst_speeds.append(velocities)
-        speed_means.append(means)
-        #save velocity into excel files, if multiple files have been readed, multiple excel files will be created
-        if save_results:
-            if not os.path.isdir(savedir):
-                raise ValueError ("Save directory is not valid")
-            savename = f'{os.path.join(savedir,names[name])}_velocity.xlsx'
-            df1 = DataFrame({'track_id': velocities[:,0], f'dt ({timelapse_units})': velocities[:,1]*dt_value, 'r_velocity': velocities[:,2], 'x_velocity': velocities[:,3], 'y_velocity': velocities[:,4], 'z_velocity': velocities[:,5]})
-            df2 = DataFrame({'track_id': np.int16(means[:,0]), 'r_velocity': np.double(means[:,1]), 'x_velocity': np.double(means[:,2]), 'y_velocity': np.double(means[:,3]), 'z_velocity': np.double(means[:,4])})
-            df3 = DataFrame({'track_id': np.int16(median[:,0]), 'r_velocity': np.double(median[:,1]), 'x_velocity': np.double(median[:,2]), 'y_velocity': np.double(median[:,3]), 'z_velocity': np.double(median[:,4])})
-            df4 = DataFrame({'track_id': np.int16(std[:,0]), 'r_velocity': np.double(std[:,1]), 'x_velocity': np.double(std[:,2]), 'y_velocity': np.double(std[:,3]), 'z_velocity': np.double(std[:,4])})
-            df5 = DataFrame({'track_id': np.int16(max[:,0]), 'r_velocity': np.double(max[:,1]), 'x_velocity': np.double(max[:,2]), 'y_velocity': np.double(max[:,3]), 'z_velocity': np.double(max[:,4])})
-            df6 = DataFrame({'track_id': np.int16(min[:,0]), 'r_velocity': np.double(min[:,1]), 'x_velocity': np.double(min[:,2]), 'y_velocity': np.double(min[:,3]), 'z_velocity': np.double(min[:,4])})
-            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='track_velocity', index=False)
-                df2.to_excel(writer, sheet_name='track_mean', index=False)
-                df3.to_excel(writer, sheet_name='track_median', index=False)
-                df4.to_excel(writer, sheet_name='track_std', index=False)
-                df5.to_excel(writer, sheet_name='track_max', index=False)
-                df6.to_excel(writer, sheet_name='track_min', index=False)
-            name = name+1
-    return inst_speeds, speed_means
+    v_file = np.asarray(v_file)
+    v_file = v_file.reshape((v_file.shape[0]*v_file.shape[1], v_file.shape[2]))
+    v_params_file = np.asarray(v_params_file)
+    if save_results:
+        if not os.path.isdir(savedir):
+            raise ValueError ("File has not been saves: Save directory is not valid")
+        savename = f'{os.path.join(savedir, names)}_velocity.xlsx'
+        df1 = DataFrame(v_file, columns=['id', f'time {timelapse_units}', 'r_speed', 'x_speed', 'y_speed', 'z_speed'])
+        df2 = DataFrame(v_params_file, columns=['id', 'r_mean', 'x_mean', 'y_mean', 'z_mean',
+                                                'r_std', 'x_std', 'y_std', 'z_std',
+                                                'r_median', 'x_median', 'y_median', 'z_median',
+                                                'r_absmax', 'x_absmax', 'y_absmax', 'z_absmax',
+                                                'r_absmin', 'x_absmin', 'y_absmin', 'z_absmin'])
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df1.to_excel(writer, sheet_name='track_speed', index=False)
+            df2.to_excel(writer, sheet_name='speed_params', index=False)
+        
+    return v_file, v_params_file
 
 def ezmsd_old(xyz:np.ndarray) -> np.ndarray:
     '''
@@ -244,6 +224,8 @@ def ezmsd_old(xyz:np.ndarray) -> np.ndarray:
             dxyz = xyz[tlag:] - xyz[:-tlag]
             msdr[tlag-1] = np.mean(dxyz**2)
     return msdr
+
+##############################
 
 def ezmsd(txyz:np.ndarray) -> np.ndarray:
     '''
