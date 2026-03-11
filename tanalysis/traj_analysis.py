@@ -227,7 +227,7 @@ def ezmsd_old(xyz:np.ndarray) -> np.ndarray:
 
 ##############################
 
-def ezmsd(txyz:np.ndarray) -> np.ndarray:
+def ezmsd(xyz:pd.DataFrame) -> np.ndarray:
     '''
     This function calculates the msd for the given trajectory. It can accept 1D trajectories or multiple dimension ones.
 
@@ -237,41 +237,20 @@ def ezmsd(txyz:np.ndarray) -> np.ndarray:
     Returns:
         msdr (array): calculated msd for given trajectory
     '''
-    s = np.shape(txyz)
-    fn = s[0]
-    msdr = np.zeros((fn-1,2)) #[tlag, sum, n_values]
-    track_msd = np.zeros((fn-1,2))
-    track_msd[:,0] = np.arange(1, fn)
-    if len(s)!=1:
-        for tlag in range(1,fn):
-            dtxyz = txyz[tlag:,:] - txyz[:-tlag,:]
-            for elem in dtxyz:
-                tlag = int(elem[0])
-                try:
-                    msdr[tlag-1,0] += np.sum(elem[1:]**2)
-                    msdr[tlag-1,1] += 1
-                except:
-                    #timelag too big
-                    continue
-        track_msd[:,1] = msdr[:,0]/msdr[:,1]
-    else:
-        for tlag in range(1,fn):
-            dtxyz = txyz[tlag:] - txyz[:-tlag]
-            for elem in dtxyz:
-                tlag = int(elem[0])
-                msdr[tlag-1,0] += elem[1]**2
-                msdr[tlag-1,1] += 1
-        track_msd[:,1] = msdr[:,0]/msdr[:,1]
-    return track_msd
+    track_msd = []
+    for tlag in range(1, len(xyz)):
+        msd = np.mean(np.nansum((np.asarray(xyz[tlag:]) - np.asarray(xyz[:-tlag]))**2, axis=-1))
+        track_msd.append(msd)
+    return np.asarray(track_msd)
 
-def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
+def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the msd for each file in the directory, with the corresponding error.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
+        tracks (pd.DataFrame): DataFrame containing all tracks in the file. Tracks must be in order [id,t,x,y,(z)]
+        names (str): name of the track conditions
         timelapse_units (str): time units of the tracks (s, min, h)
         savedir (str): path where resulting excels will be saved. Defaults to None
         save_results (bool): save excel with the results of the function. Defaults to True
@@ -280,54 +259,33 @@ def get_msd(tracks:list[np.ndarray], names:list[str], timelapse_units:str, saved
         final_msd: list of msd of all valid tracks
         final_mean_msd: list of mean msd for each condition analyzed
     ''' 
-    #Make all files have the same msd lenght
-    shortest_msd = np.inf
-    for file in tracks:
-        _, dur, _ = np.shape(file)
-        if dur-1<shortest_msd:
-            shortest_msd=dur-1 
-    name = 0
-    final_msds = []
-    final_mean_msds = []
-    for file in tracks:
-        t_count = 0
-        msds = np.zeros((len(file), int(shortest_msd), 3))
-        diff_coef = np.zeros((len(file), 2))
-        for track in file:
-            copy_track = np.copy(track)
-            msd = np.zeros((int(shortest_msd), 3))
-            msd[:,0] = copy_track[:int(shortest_msd),0]
-            dt = np.min(np.diff(copy_track[:dur,1], axis=0))
-            copy_track[:int(shortest_msd)+1,1] = copy_track[:int(shortest_msd)+1,1]/dt
-            txyz = copy_track[:int(shortest_msd)+1,1:]
-            msd0 = ezmsd(txyz)
-            msd[:,1:] = msd0[:int(shortest_msd),:]
-            msds[t_count,:,:] = msd
-            regr = linregress(np.log10(msd0[:int(shortest_msd/2),0]), np.log10(msd0[:int(shortest_msd/2),1]))
-            D = abs(regr.slope/6)
-            diff_coef[t_count,:] = np.array([int(np.min(msd[:,0])), D])
-            t_count+=1
-        file_msd = np.reshape(msds[:,:,:], (len(file)*int(shortest_msd), 3))
-        time_lags = msds[0,:,1]
-        mean_msd = np.mean(msds[:,:,2], axis=0)
-        std_dev = np.std(msds[:,:,2], axis=0)/np.sqrt(shortest_msd)
-        final_msds.append(file_msd)
-        final_mean_msds.append(np.array([time_lags,mean_msd,std_dev]))
-
-        #save the file
-        if save_results:
-            if not os.path.isdir(savedir):
-                raise ValueError ("Save directory is not valid")
-            savename = f'{os.path.join(savedir,names[name])}_msd.xlsx'
-            df1 = DataFrame({'track_id':file_msd[:,0], f'dt ({timelapse_units})': file_msd[:,1]*dt, 'msd': file_msd[:,2]})
-            df2 = DataFrame({f'dt ({timelapse_units})': time_lags*dt, 'msd': mean_msd, 'std_dev': std_dev})
-            df3 = DataFrame({'track_id':diff_coef[:,0], 'diffusion_coefficient': diff_coef[:,1]})
-            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='track_msd', index=False)
-                df2.to_excel(writer, sheet_name='mean_msd', index=False)
-                df3.to_excel(writer, sheet_name='diff_coef', index=False)
-            name = name+1
-    return final_msds, final_mean_msds
+    ids = np.unique(tracks.index.get_level_values(0))
+    final_msds = pd.DataFrame(data=np.arange(1,len(tracks.loc[ids[0]].index)), index=np.arange(1,len(tracks.loc[ids[0]].index)), columns=['frame']) 
+    diff_coef = pd.DataFrame(data=['D'], index=[ids[0]], columns=['diff_coef'])
+    frames = tracks.loc[ids[0]].index
+    # Calculate msd for each track in the file
+    for id in ids:
+        track = tracks.loc[id]
+        dt = np.unique(np.diff(track, axis=0)[:,0][0])
+        xyz = track.iloc[:,slice(1,None,1)]
+        msd0 = ezmsd(xyz)
+        final_msds[f'msd_{id}'] = msd0
+        regr = linregress(np.log10(np.array(frames[1:])), np.log10(msd0))
+        D = abs(regr.slope/(2*len(xyz.columns)))
+        diff_coef[f'D_{id}'] = D
+    mean_msd = np.mean(final_msds, axis=1)
+    std_msd = np.std(final_msds, axis=1)
+    #save the file
+    if save_results:
+        if not os.path.isdir(savedir):
+            raise ValueError ("Save directory is not valid")
+        savename = f'{os.path.join(savedir,names)}_msd.xlsx'
+        df2 = DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames))*dt, 'msd': mean_msd, 'std_dev': std_msd})
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df2.to_excel(writer, sheet_name='mean_msd', index=False)
+            final_msds.to_excel(writer, sheet_name='track_msd', index=False)
+            diff_coef.to_excel(writer, sheet_name='diff_coef', index=False)
+    return final_msds
 
 def directionality_tortuosity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
@@ -772,6 +730,8 @@ def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:i
             name = name+1
     return
 
+################################################
+
 def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density funtion (PDF) of the angle. 
@@ -817,7 +777,6 @@ def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tl
 
     return
 
-################################################
 def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
     '''
     This function is used to determine the polarity of the velocity. It detrmines the primary axis and rotates the 
