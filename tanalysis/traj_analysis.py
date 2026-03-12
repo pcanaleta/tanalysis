@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from pandas import DataFrame
 import os
 from scipy.optimize import curve_fit
 from scipy.stats import linregress
@@ -55,7 +54,7 @@ def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     #saving tracks in excel file
     name = os.path.split(dirname)
     savename = fr'{savedir}\{name[-1]}.xlsx'
-    df = DataFrame({'id': axlsxdata[:,0], 'time': axlsxdata[:,1], 'x': axlsxdata[:,2], 'y': axlsxdata[:,3], 'z': axlsxdata[:,4]})
+    df = pd.DataFrame({'id': axlsxdata[:,0], 'time': axlsxdata[:,1], 'x': axlsxdata[:,2], 'y': axlsxdata[:,3], 'z': axlsxdata[:,4]})
     df.to_excel(savename, sheet_name='trajectories', index=False)  
     return
 
@@ -190,8 +189,8 @@ def velocity(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str=""
         if not os.path.isdir(savedir):
             raise ValueError ("File has not been saves: Save directory is not valid")
         savename = f'{os.path.join(savedir, names)}_velocity.xlsx'
-        df1 = DataFrame(v_file, columns=['id', f'time {timelapse_units}', 'r_speed', 'x_speed', 'y_speed', 'z_speed'])
-        df2 = DataFrame(v_params_file, columns=['id', 'r_mean', 'x_mean', 'y_mean', 'z_mean',
+        df1 = pd.DataFrame(v_file, columns=['id', f'time {timelapse_units}', 'r_speed', 'x_speed', 'y_speed', 'z_speed'])
+        df2 = pd.DataFrame(v_params_file, columns=['id', 'r_mean', 'x_mean', 'y_mean', 'z_mean',
                                                 'r_std', 'x_std', 'y_std', 'z_std',
                                                 'r_median', 'x_median', 'y_median', 'z_median',
                                                 'r_absmax', 'x_absmax', 'y_absmax', 'z_absmax',
@@ -225,8 +224,6 @@ def ezmsd_old(xyz:np.ndarray) -> np.ndarray:
             msdr[tlag-1] = np.mean(dxyz**2)
     return msdr
 
-##############################
-
 def ezmsd(xyz:pd.DataFrame) -> np.ndarray:
     '''
     This function calculates the msd for the given trajectory. It can accept 1D trajectories or multiple dimension ones.
@@ -256,13 +253,14 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         save_results (bool): save excel with the results of the function. Defaults to True
 
     Returns:
-        final_msd: list of msd of all valid tracks
-        final_mean_msd: list of mean msd for each condition analyzed
+        final_msds: dataframe of msds for all tracks
+        mean_msds: dataframe of the mean msd
+        diff_coef: dataframe of diffusion coefficient for all tracks
     ''' 
     ids = np.unique(tracks.index.get_level_values(0))
-    final_msds = pd.DataFrame(data=np.arange(1,len(tracks.loc[ids[0]].index)), index=np.arange(1,len(tracks.loc[ids[0]].index)), columns=['frame']) 
-    diff_coef = pd.DataFrame(data=['D'], index=[ids[0]], columns=['diff_coef'])
     frames = tracks.loc[ids[0]].index
+    final_msds = pd.DataFrame(data=np.arange(1,len(frames)), index=np.arange(1,len(frames)), columns=['frame']) 
+    diff_coef = pd.DataFrame(data=['D'], index=[ids[0]], columns=['diff_coef'])
     # Calculate msd for each track in the file
     for id in ids:
         track = tracks.loc[id]
@@ -275,227 +273,178 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         diff_coef[f'D_{id}'] = D
     mean_msd = np.mean(final_msds, axis=1)
     std_msd = np.std(final_msds, axis=1)
+    mean_msds = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames))*dt, 'msd': mean_msd, 'std_dev': std_msd})
     #save the file
     if save_results:
         if not os.path.isdir(savedir):
             raise ValueError ("Save directory is not valid")
         savename = f'{os.path.join(savedir,names)}_msd.xlsx'
-        df2 = DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames))*dt, 'msd': mean_msd, 'std_dev': std_msd})
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-            df2.to_excel(writer, sheet_name='mean_msd', index=False)
+            mean_msds.to_excel(writer, sheet_name='mean_msd', index=False)
             final_msds.to_excel(writer, sheet_name='track_msd', index=False)
             diff_coef.to_excel(writer, sheet_name='diff_coef', index=False)
-    return final_msds
+    return final_msds, mean_msds, diff_coef
 
-def directionality_tortuosity(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
+def directionality_tortuosity(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the directionality and the tortuosity for each track in the given files.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
+        tracks (pd.DataFrame): dataframe of tracks. Tracks must be in order [id,t,x,y,(z)]
+        names (str): name of the track conditions
         timelapse_units (str): time units of the tracks (s, min, h)
         savedir (str): path where resulting excels will be saved. Defaults to None
         save_results (bool): save excel with the results of the function. Defaults to True
 
     Returns:
-        directionality: list of directionalities of all valid tracks
-        tortuosity: list of tortuosity of all valid tracks
+        df_dir_tort: dataframe with calculated directionality and tortuosity
     '''
-    name = 0
-    directionality = []
-    tortuosity = []
-    for file in tracks:
-        file_directionality=[]
-        file_tortuosity=[]
-        file_track_id=[]
-        for track in file:
-            xyz = track[:,2:]
-            d_euclidean = np.sqrt(np.sum((xyz[-1,:]-xyz[0,:])**2, axis=0))
-            d_total = np.sum(np.linalg.norm(np.diff(xyz,axis=0),axis=-1))
-            file_track_id.append(track[0,0])
-            file_directionality.append(d_euclidean/d_total)
-            file_tortuosity.append(d_total/d_euclidean)
-        directionality.append(np.array(file_directionality))
-        tortuosity.append(np.array(file_tortuosity))
+    dir_tort = []
+    ids = np.unique(tracks.index.get_level_values(0))
+    # calculate directionality and tortuosity for each track
+    for id in ids:
+        xyz = tracks.loc[id].iloc[:,slice(1,None,1)]
+        d_euclidean = np.sqrt(np.nansum((xyz.iloc[-1]-xyz.iloc[0])**2, axis=0))
+        d_total = np.nansum(np.linalg.norm(np.diff(xyz, axis=0), axis=1))
+        dir_tort.append([id, d_euclidean/d_total, d_total/d_euclidean])
+    df_dir_tort = pd.DataFrame(np.asarray(dir_tort), columns=['id', 'directionality', 'tortuosity'])
 
-        if save_results:
-            if not os.path.isdir(savedir):
-                raise ValueError ("Save directory is not valid")
-            savename = f'{os.path.join(savedir,names[name])}_directionality_tortuosity.xlsx'
-            df1 = DataFrame({'track_id':np.array(file_track_id),'directionality':np.array(file_directionality),'tortuosity':np.array(file_tortuosity)})
-            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='direct_tortuos', index=False)
-        name+=1
+    # save results in excel file
+    if save_results:
+        if not os.path.isdir(savedir):
+            raise ValueError ("Save directory is not valid")
+        savename = f'{os.path.join(savedir, names)}_directionality_tortuosity.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df_dir_tort.to_excel(writer, sheet_name='direct_tortuos', index=False)
 
-    return directionality, tortuosity
+    return df_dir_tort
 
-def spatial_coverage(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
+def spatial_coverage(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the spatial coverage for each track in the given files.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
+        tracks (pd.DataFrame): dataframe of tracks. Tracks must be in order [id,t,x,y,(z)]
+        names (str): name of the track conditions
         timelapse_units (str): time units of the tracks (s, min, h)
         savedir (str): path where resulting excels will be saved. Defaults to None
         save_results (bool): save excel with the results of the function. Defaults to True
 
     Returns:
-        sp_cov: list of spatial coverages for each track in files
+        df_sp_cov: dataframe of calculated spatial coverage values 
     '''
-    name = 0
     sp_cov = []
-    for file in tracks:
-        file_spatial_coverage=[]
-        file_track_id=[]
-        for track in file:
-            xyz = track[:,2:]
-            file_track_id.append(track[0,0])
-            hull = ConvexHull(xyz, qhull_options='QJ')
-            spatial_coverage = hull.volume
-            file_spatial_coverage.append(spatial_coverage)
-        sp_cov.append(np.array(file_spatial_coverage))
+    ids = np.unique(tracks.index.get_level_values(0))
+    # calculate spatial coverage of the tracks
+    for id in ids:
+        xyz = tracks.loc[id].iloc[:,slice(1,None,1)].dropna()
+        spatial_coverage = ConvexHull(xyz, qhull_options='QJ').volume
+        sp_cov.append([id, spatial_coverage])
+    df_sp_cov = pd.DataFrame(np.asarray(sp_cov), columns=['id', 'spatial_coverage'])
 
-        if save_results:
-            if not os.path.isdir(savedir):
-                raise ValueError ("Save directory is not valid")
-            savename = f'{os.path.join(savedir,names[name])}_spatial_coverage.xlsx'
-            df1 = DataFrame({'track_id':np.array(file_track_id),'spatial_coverage':np.array(file_spatial_coverage)})
-            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='sp_cov', index=False)
+    # save results in excel file
+    if save_results:
+        if not os.path.isdir(savedir):
+            raise ValueError ("Save directory is not valid")
+        savename = f'{os.path.join(savedir, names)}_spatial_coverage.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df_sp_cov.to_excel(writer, sheet_name='sp_cov', index=False)
 
-        name+=1
-    return sp_cov
+    return df_sp_cov
 
-def turning_angle(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
+def turning_angle(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function calculates the total turning angle of each track in the given files.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
+        tracks (pd.DataFrame): dataframes of tracks. Tracks must be in order [id,t,x,y,(z)]
+        names (str): name of the track conditions
         timelapse_units (str): time units of the tracks (s, min, h)
         savedir (str): path where resulting excels will be saved. Defaults to None
         save_results (bool): save excel with the results of the function. Defaults to True
 
     Returns:
-        : list of spatial coverages for each track in files
+        df_turning_angle: dataframe containing the total turning angle and persistance for each track in file
     '''
-    name = 0
     turning_angle = []
-    persist = []
-    for file in tracks:
-        file_tta=[]
-        file_track_id=[]
-        avg_persistence = []
-        for track in file:
-            track_id = track[0,0]
-            xyz = track[:,2:]
-            dxyz = np.diff(xyz, axis=0)
-            total_turning_angle = 0
-            persistence=[]
-            for i in range(1, len(dxyz)):
-                dir1=dxyz[i-1,:]
-                dir2=dxyz[i,:]
-                if np.linalg.norm(dir1)==0 or np.linalg.norm(dir2)==0:
-                    continue
-                cos_angle = np.dot(dir1, dir2)/(np.linalg.norm(dir1)*np.linalg.norm(dir2))
-                cos_angle = np.clip(cos_angle, -1, 1)
-                persistence.append(cos_angle)
-                angle = np.degrees(np.arccos(cos_angle))
-                total_turning_angle += angle
-            file_tta.append(total_turning_angle)
-            file_track_id.append(track_id)
-            avg_persistence.append(np.mean(persistence))
-        turning_angle.append(np.array(file_tta))
-        persist.append(np.array(avg_persistence))
+    ids = np.unique(tracks.index.get_level_values(0))
+    # calculate total turning angle and persistence of the tracks
+    for id in ids:
+        xyz = tracks.loc[id].iloc[:,slice(1,None,1)].dropna()
+        dxyz = np.diff(xyz, axis=0)
+        total_turning_angle = 0
+        persistence = []
+        for i in range(1, len(dxyz)):
+            dir1 = dxyz[i-1,:]
+            dir2 = dxyz[i,:]
+            if np.linalg.norm(dir1)==0 or np.linalg.norm(dir2)==0:
+                # ignore frames where cell has not moved
+                continue
+            cos_angle = np.dot(dir1, dir2)/(np.linalg.norm(dir1)*np.linalg.norm(dir2))
+            cos_angle = np.clip(cos_angle, -1, 1)
+            persistence.append(cos_angle)
+            total_turning_angle += np.degrees(np.arccos(cos_angle))
+        turning_angle.append([id, total_turning_angle, abs(np.mean(persistence))])
+    df_turning_angle = pd.DataFrame(turning_angle, columns=['id', 'total_turning_angle', 'persistence'])
 
-        if save_results:
-            if not os.path.isdir(savedir):
-                raise ValueError ("Save directory is not valid")
-            savename = f'{os.path.join(savedir,names[name])}_total_turning_angle.xlsx'
-            df1 = DataFrame({'track_id':np.array(file_track_id),'total_turning_angle':np.array(file_tta), 'persistence':np.array(avg_persistence)})
-            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='tt_angle', index=False)
+    # save results in excel file
+    if save_results:
+        if not os .path.isdir(savedir):
+            raise ValueError ("Save directory is not valid")
+        savename = f'{os.path.join(savedir, names)}_total_turning_angle.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df_turning_angle.to_excel(writer, sheet_name='tt_angle', index=False)
 
-        name+=1
-    return turning_angle, persistence
+    return df_turning_angle
 
-def get_acf(tracks:list[np.ndarray], names:list[str], timelapse_units:str, savedir:str="", save_results:bool=True):
+def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function determines the acf for each file in the directory, with the corresponding error.
     Excel files need to have the following column order: [track_id, t, x, y, (z)].
 
     Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
+        tracks (pd.DataFrame): dataframe of tracks. Tracks must be in order [id,t,x,y,(z)]
+        names (str): name of the track condition
         timelapse_units (str): time units of the tracks (s, min, h)
         savedir (str): path where resulting excels will be saved. Defaults to None
         save_results (bool): save excel with the results of the function. Defaults to True
 
     Returns:
-        list: list of mean speeds of the tracks
+        final_acfs: dataframe containing the calculated acf for each track
+        mean_acfs: dataframe with the mean acf values
     '''
-    shortest_acf = np.inf
-    for file in tracks:
-        _, dur, _ = np.shape(file)
-        if dur-1<shortest_acf:
-            shortest_acf=dur-1
-    name=0
-    for file in tracks:
-        file_acf=[]
-        file_track_ids=[]
-        file_time_lags=[]
-        #calculate acf for each track in the file
-        for track in file:
-            copy_track = np.copy(track)
-            track_id = copy_track[:,0]
-            dt = np.min(np.diff(copy_track[:dur,1], axis=0))
-            copy_track[:int(shortest_acf)+1,1] = copy_track[:int(shortest_acf)+1,1]/dt
-            txyz = copy_track[:int(shortest_acf)+1,1:]
-            dtxyz = np.diff(txyz, axis=0)
-            f_dtxyz = []
-            t = 0
-            for frame in dtxyz:
-                t = t+frame[0]
-                f_dtxyz.append([t, *frame])
-            a_dtxyz=np.array(f_dtxyz)
-            acf = []  
-            for tlag in range(1,len(a_dtxyz)-1):
-                c_acf=[]
-                for i in range(1,len(a_dtxyz)-tlag):
-                    if a_dtxyz[i+tlag,0]-a_dtxyz[i,0]==tlag:
-                        c_acf.append(np.sum(a_dtxyz[i,2:]*a_dtxyz[i+tlag,2:],axis=-1))
-                    else:
-                        continue
-                acf.append(np.sum(c_acf, axis=0)/(len(a_dtxyz)-tlag))
-            file_track_ids.append(track_id[:len(acf)])
-            file_time_lags.append(range(1,len(a_dtxyz)-1)*dt)
-            file_acf.append(np.array(acf))
+    ids = np.unique(tracks.index.get_level_values(0))
+    frames = tracks.loc[ids[0]].index
+    final_acfs = pd.DataFrame(data=np.arange(1,len(frames)-1), index=np.arange(1,len(frames)-1), columns=['frame']) 
+    # Calculate acf for each track in the file
+    for id in ids:
+        track = tracks.loc[id]
+        dt = np.unique(np.diff(track, axis=0)[:,0][0])
+        xyz = track.iloc[:,slice(1,None,1)]
+        dxyz = np.diff(xyz, axis=0)
+        track_acf = []
+        for tlag in range(1, len(xyz)-1):
+            acf = np.mean(np.nansum(dxyz[tlag:]*dxyz[:-tlag], axis=1))
+            track_acf.append(acf)
+        acf0 = np.asarray(track_acf)
+        final_acfs[f'acfs_{id}'] = np.abs(acf0)
+    mean_acf = np.mean(final_acfs, axis=1)
+    std_acf = np.std(final_acfs, axis=1)
+    mean_acfs = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-1)*dt, 'acf': mean_acf, 'std_dev': std_acf})
+    #save the file
+    if save_results:
+        if not os.path.isdir(savedir):
+            raise ValueError ("Save directory is not valid")
+        savename = f'{os.path.join(savedir,names)}_acf.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            mean_acfs.to_excel(writer, sheet_name='mean_acf', index=False)
+            final_acfs.to_excel(writer, sheet_name='track_acf', index=False)
+    return final_acfs, mean_acfs
 
-        #Calculate mean acf for the file
-        arr_acf = np.array(file_acf)
-        mean_acf = np.mean(arr_acf,axis=0)
-        std_acf = np.std(arr_acf,axis=0)/np.sqrt(len(arr_acf))
-        timelags = range(1,len(mean_acf)+1)
-
-        if save_results:
-            if not os.path.isdir(savedir):
-                raise ValueError ("Save directory is not valid")
-            savename = f'{os.path.join(savedir,names[name])}_acf.xlsx'
-            df1 = DataFrame({'track_id':np.array(file_track_ids).flatten(),f'timelag ({timelapse_units})':np.array(file_time_lags).flatten(),'total_turning_angle':np.array(file_acf).flatten()})
-            df2 = DataFrame({'timelag':timelags*dt, 'mean_acf':mean_acf, 'std_acf':std_acf})
-            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='track_acf', index=False)
-                df2.to_excel(writer, sheet_name='mean_acf', index=False)
-
-        name = name+1
-
-    return
+###########################################
 
 def tPRW3D(x:np.ndarray, P:float, S:float, SE:float):
     return 3*(S**2)*P*(x-P*(1-np.exp(-x/P)))+6*SE**2
