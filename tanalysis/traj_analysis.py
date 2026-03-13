@@ -377,6 +377,7 @@ def turning_angle(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:s
         dxyz = np.diff(xyz, axis=0)
         total_turning_angle = 0
         persistence = []
+        turn_angle = []
         for i in range(1, len(dxyz)):
             dir1 = dxyz[i-1,:]
             dir2 = dxyz[i,:]
@@ -386,6 +387,7 @@ def turning_angle(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:s
             cos_angle = np.dot(dir1, dir2)/(np.linalg.norm(dir1)*np.linalg.norm(dir2))
             cos_angle = np.clip(cos_angle, -1, 1)
             persistence.append(cos_angle)
+            turn_angle.append(np.degrees(np.arccos(cos_angle))) ####################################################
             total_turning_angle += np.degrees(np.arccos(cos_angle))
         turning_angle.append([id, total_turning_angle, abs(np.mean(persistence))])
     df_turning_angle = pd.DataFrame(turning_angle, columns=['id', 'total_turning_angle', 'persistence'])
@@ -394,7 +396,7 @@ def turning_angle(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:s
     if save_results:
         if not os .path.isdir(savedir):
             raise ValueError ("Save directory is not valid")
-        savename = f'{os.path.join(savedir, names)}_total_turning_angle.xlsx'
+        savename = f'{os.path.join(savedir, names)}_turning_angle.xlsx'
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
             df_turning_angle.to_excel(writer, sheet_name='tt_angle', index=False)
 
@@ -444,8 +446,6 @@ def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
             final_acfs.to_excel(writer, sheet_name='track_acf', index=False)
     return final_acfs, mean_acfs
 
-###########################################
-
 def tPRW3D(x:np.ndarray, P:float, S:float, SE:float):
     return 3*(S**2)*P*(x-P*(1-np.exp(-x/P)))+6*SE**2
 
@@ -455,9 +455,12 @@ def tPRW2D(x:np.ndarray, P:float, S:float, SE:float):
 def tPRW1D(x:np.ndarray, P:float, S:float, SE:float):
     return (S**2)*P*(x-P*(1-np.exp(-x/P)))+2*SE**2
 
-def fit_APRW(tracks:list[np.ndarray], names:list[str], savedir:str):
+###########################################
+
+def fit_APRW(tracks:pd.DataFrame, names:str, savedir:str):
     '''
-    This functions rotates the trajectories to the primary axis of migration (p) and calculates the msd for the primary and non primary axis.
+    This functions rotates the trajectories to the primary axis of migration (p) and calculates the msd for the 
+    primary and non primary axes.
 
     Args:
         dirname (string): path to the folder containing the original trajectories
@@ -468,7 +471,15 @@ def fit_APRW(tracks:list[np.ndarray], names:list[str], savedir:str):
     if not os.path.exists(savedir):
         os.makedirs(savedir)
     
-    name=0
+    ids = np.unique(tracks.index.get_level_values(0))
+    for id in ids:
+        track = tracks.loc[id]
+        xyz = track.iloc[:,slice(1,None,1)]
+        xyzr = xyz - np.mean(xyz, axis=0)
+        dxyz = np.diff(xyz, axis=0)
+        U,S,V = np.linalg.svd(dxyz, full_matrices=True)
+        xyzrot = xyz@np.transpose(V) ######
+
     for file in tracks:
         params_list = []
         for track in file:
