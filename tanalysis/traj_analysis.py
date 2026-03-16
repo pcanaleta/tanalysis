@@ -235,8 +235,12 @@ def ezmsd(xyz:pd.DataFrame) -> np.ndarray:
         msdr (array): calculated msd for given trajectory
     '''
     track_msd = []
+    dims = len(xyz.shape)
     for tlag in range(1, len(xyz)):
-        msd = np.mean(np.nansum((np.asarray(xyz[tlag:]) - np.asarray(xyz[:-tlag]))**2, axis=-1))
+        if dims > 1:
+            msd = np.mean(np.nansum((np.asarray(xyz[tlag:]) - np.asarray(xyz[:-tlag]))**2, axis=-1))
+        else:
+            msd = np.mean((np.asarray(xyz[tlag:]) - np.asarray(xyz[:-tlag]))**2)
         track_msd.append(msd)
     return np.asarray(track_msd)
 
@@ -455,84 +459,62 @@ def tPRW2D(x:np.ndarray, P:float, S:float, SE:float):
 def tPRW1D(x:np.ndarray, P:float, S:float, SE:float):
     return (S**2)*P*(x-P*(1-np.exp(-x/P)))+2*SE**2
 
-###########################################
-
 def fit_APRW(tracks:pd.DataFrame, names:str, savedir:str):
     '''
     This functions rotates the trajectories to the primary axis of migration (p) and calculates the msd for the 
     primary and non primary axes.
 
     Args:
-        dirname (string): path to the folder containing the original trajectories
-        dt (int): trajectory time step size
-        dim (int): dimensionality of the tracks (2 for 2D or 3 for 3D)
-        tlag (int): defaults to 1. Time lag to determine the rotational matrix
+        tracks (pd.DataFrame): dataframe containing the trajectories of the file
+        names (str): name of the condition of the tracks in the file
+        savedir (str): folder path where the parameters will be saved
     '''
     if not os.path.exists(savedir):
         os.makedirs(savedir)
     
+    params_list = []
     ids = np.unique(tracks.index.get_level_values(0))
     for id in ids:
         track = tracks.loc[id]
-        xyz = track.iloc[:,slice(1,None,1)]
+        xyz = track.iloc[:,slice(1,None,1)].dropna()
         xyzr = xyz - np.mean(xyz, axis=0)
         dxyz = np.diff(xyz, axis=0)
         U,S,V = np.linalg.svd(dxyz, full_matrices=True)
-        xyzrot = xyz@np.transpose(V) ######
+        xyzrot = xyz@V.T 
 
-    for file in tracks:
-        params_list = []
-        for track in file:
-            t = track[:,1]
-            xyz = track[:,2:]
-            dt = np.min(np.diff(track[:,1]))
-            used_len = np.uint16(np.round(len(track))/4)
-            dtxyz = np.diff(xyz, axis=0)
-            xyzr = xyz-np.mean(xyz, axis=0) #major axis of trajectories
-            U,S,V = np.linalg.svd(dtxyz, full_matrices=True)
-            xyzrot = xyz@np.transpose(V)
-            txyz_list=[]
-            for time,row in zip(t,xyzrot):
-                txyz_list.append([time/dt, *row])
-            txyz=np.array(txyz_list)
-            
-            dim = len(xyz[0,:])
-            time = np.linspace(1, used_len, used_len)
-            t = time*dt
-            wif = (2*time**2+1)/(3*time*(used_len-time+1))
-            msdp0 = ezmsd(txyz[:,:2])[:,1]
-            msdp = msdp0[:used_len]
-            wtp = (msdp*wif**2)
-            msdnp0 = ezmsd(txyz[:,:3:2])[:,1]
-            if dim==3:
-                msdnp0 += ezmsd(txyz[:,::3])[:,1]
-            msdnp = msdnp0[:used_len]
-            wtnp = (msdnp*wif**2)
-                        
-            if dim==3:
-                poptp, pcovp = curve_fit(tPRW1D, t, msdp, p0=(3*dt,1,1), bounds=([0, 0, 0], [1000,10,100]), method='trf', maxfev=10000)#, sigma=wtp, absolute_sigma=True)
-                poptnp, pcovnp = curve_fit(tPRW2D, t, msdnp, p0=(3*dt,1,1), bounds=([0, 0, 0], [1000,10,100]), method='trf', maxfev=10000)#, sigma=wtnp, absolute_sigma=True)
-            if dim==2:
-                poptp, pcovp = curve_fit(tPRW1D, t, msdp, p0=(3*dt,1,1), bounds=([0, 0, 0], [1000,10,100]), method='trf', maxfev=10000, sigma=wtp, absolute_sigma=True)
-                poptnp, pcovnp = curve_fit(tPRW1D, t, msdnp, p0=(3*dt,1,1), bounds=([0, 0, 0], [1000,10,100]), method='trf', maxfev=10000, sigma=wtnp, absolute_sigma=True)
+        dt = np.unique(np.diff(track, axis=0)[:,0][0])[0]
+        frames = xyz.index
+        tlag = frames[1:]
+        
+        msdp = ezmsd(xyzrot.iloc[:,0])
+        poptp, _ = curve_fit(tPRW1D, tlag*dt, msdp, p0=(100,0.1,1), bounds=([0, 0, 0], [1000,100/dt,10]), 
+                             method='trf', maxfev=10000)
+        msdnp = ezmsd(xyzrot.iloc[:,1])
+        rmsep = np.sqrt(np.mean((msdp - tPRW1D(tlag*dt, *poptp))**2))
+        if len(xyz.columns) == 3:
+            msdnp += ezmsd(xyzrot.iloc[:,2])
+            poptnp, _ = curve_fit(tPRW2D, tlag*dt, msdnp, p0=(100,0.1,1), bounds=([0, 0, 0], [1000,100/dt,10]), 
+                                 method='trf', maxfev=10000)
+            rmsenp = np.sqrt(np.mean((msdnp - tPRW2D(tlag*dt, *poptnp))**2))
+        else:
+            poptnp, _ = curve_fit(tPRW1D, tlag*dt, msdnp, p0=(100,0.1,1), bounds=([0, 0, 0], [1000,100/dt,10]), 
+                                 method='trf', maxfev=10000)
+            rmsenp = np.sqrt(np.mean((msdnp - tPRW1D(tlag*dt, *poptnp))**2))
 
-            rmsep=np.sqrt(np.mean((msdp-tPRW1D(t,*poptp))**2))
-            rmsenp=np.sqrt(np.mean((msdnp-tPRW2D(t,*poptnp))**2))
+        params_list.append([*poptp, rmsep])
+        params_list.append([*poptnp, rmsenp])
+    index = pd.MultiIndex.from_product([ids,['p', 'np']])
+    df_params = pd.DataFrame(np.array(params_list), index=index, columns=['P','S','SE','rmse'])
+    if os.path.isdir(savedir):
+        savename = f'{os.path.join(savedir,names)}_APRW_params.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df_params.to_excel(writer, sheet_name='APRW_params', index=True)
+    
+    return df_params
 
-            Pp,Sp,SEp = poptp
-            Pnp,Snp,SEnp = poptnp
-            params_list.append([Pp,Sp,SEp,rmsep])
-            params_list.append([Pnp,Snp,SEnp,rmsenp])
+###########################################
 
-        params=np.array(params_list)
-
-        savename = f'{os.path.join(savedir,names[name])}_APRW_params.xlsx'
-        pd.DataFrame({'P':params[:,0], 'S':params[:,1], 'SE':params[:,2], 'rmse':params[:,3]}).to_excel(savename, sheet_name='params', index=False)
-        name = name+1
-
-    return params
-
-def sim_APRW(dirname:str, tracks:list[np.ndarray], Nmax:int=50, repeats:int=30, subsamples:int=100):
+def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, Nmax:int=50, repeats:int=30, subsamples:int=100, savedir:str=None):
     '''
     This function simulates different tracks with the parameters determined in the fitting. The function saves an .xlsx file with all simulated tracks
 
@@ -543,6 +525,13 @@ def sim_APRW(dirname:str, tracks:list[np.ndarray], Nmax:int=50, repeats:int=30, 
         Nmax (int): maximum number of time lags that will be calculated when simulating the tracks
         repeats (int): number of simulated tracks per set of parameters
     '''
+    ids = np.unique(params.index.get_level_values(0))
+    for id in ids:
+        track_params = params.loc[id]
+        beta = 1/track_params['P']
+        alpha = (track_params['S']**2)*beta
+        map = 
+
     subsample = subsamples
     for file in tracks:
         for track in file:
