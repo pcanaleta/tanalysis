@@ -512,136 +512,95 @@ def fit_APRW(tracks:pd.DataFrame, names:str, savedir:str):
     
     return df_params
 
-###########################################
-
-def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, Nmax:int=50, repeats:int=30, subsamples:int=100, savedir:str=None):
+def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, repeats:int=30, subsamples:int=100, savedir:str=None):
     '''
     This function simulates different tracks with the parameters determined in the fitting. The function saves an .xlsx file with all simulated tracks
 
     Args:
-        dirname (string): path to the directory containing the files with the parameters
-        tracks (list): list of arrays containing the values of the tracks. Used to extract som necessary data. Order of the tracks must be [id, t, x, y, z]
-        dim (int): dimensionality of the tracks (2 for 2D and 3 for 3D)
+        params (pd.DataFrame): dataframe with the parameters calculated in fit_APRW function
+        tracks (pd.DataFrame): dataframe containing the trajectories of the file
+        names (str): name of the condition of the tracks
         Nmax (int): maximum number of time lags that will be calculated when simulating the tracks
         repeats (int): number of simulated tracks per set of parameters
+        subsamples (int): number of divisions between time lags. Used for calculation of the simulated tracks
+        savedir (str): path to the folder where simulated tracks will be saved
     '''
     ids = np.unique(params.index.get_level_values(0))
+
+    #Extract tlag and dimensions from original tracks
+    track = tracks.loc[ids[0]]
+    dim = len(track.columns)-1
+    tlag = np.unique(np.diff(track['time']))[0]
+    dt = tlag/subsamples
+    ss = 10 ** np.ceil(np.log10(repeats))
+    #Simulation of given number of repeats for each track
+    xys00 = []
+    count = 0
     for id in ids:
         track_params = params.loc[id]
         beta = 1/track_params['P']
         alpha = (track_params['S']**2)*beta
-        map = 
+        FR = np.asarray(np.sqrt(alpha*dt)*dt)
+        ap = np.array((max(0, 1-dt/track_params['P'].iloc[0]), max(0, 1-dt/track_params['P'].iloc[1])))
+        SE = np.asarray(track_params['SE'])
+        fnum = Nmax*subsamples
+        if dim==3:
+            ap = np.append(ap, ap[-1])
+            FR = np.append(FR, FR[-1])
+            SE = np.append(SE, SE[-1])
 
-    subsample = subsamples
-    for file in tracks:
-        for track in file:
-            tlag = np.min(np.diff(track[:,1]))
-            dim = len(track[0,2:])
-    
-    dt = tlag/subsample 
-    savedir = fr'{dirname}\Simulations'
-    if not os.path.exists(savedir):
-        os.makedirs(savedir)
+        for rep in range(0, repeats):
+            dr = np.zeros((fnum, dim))
+            xyz = np.zeros((fnum, dim))
 
-    params = []
-    savenames = []
-    for fname in os.listdir(dirname):
-        ext = os.path.splitext(fname)[-1].lower()
-        if ext=='.xlsx' or ext=='.xls':
-            df = pd.read_excel(os.path.abspath(os.path.join(dirname,fname))).to_numpy()
-            params.append(df)
-            newname = fname.replace('_params.xlsx', '_sim_tracks.xlsx')
-            savename = os.path.join(savedir, newname)
-            savenames.append(savename)
-
-    ss = 10 ** np.ceil(np.log10(repeats))
-    n = 0
-
-    for file in params:
-        xys00 = []
-        simxy = []
-        count = 1
-        for i in range(0, len(file), 2):
-            P = file[i:i+2,0]
-            S = file[i:i+2,1]
-            mSE = file[i:i+2,2]
-            beta = 1/P
-            alpha = (S**2)*beta
-            map = np.array([max(0, 1-dt/P[0]), max(0, 1-dt/P[1])])
-            mFR = np.sqrt(alpha*dt)*dt
+            for i in range(0, fnum-1):
+                dr[i+1,:] = FR*np.random.randn(3) + ap*dr[i,:]
+                xyz[i+1,:] = xyz[i,:] + dr[i,:]
+            exyz = xyz[::subsamples, :]
+            oxyz = exyz - np.ones((exyz.shape[0], 1))*exyz[0,:]
+            oxyz = oxyz + np.random.randn(len(oxyz[:]),dim)*SE #Position noise
 
             if dim==3:
-                ap = np.append(map, map[-1])
-                FR = np.append(mFR, mFR[-1])
-                SE = np.append(mSE, mSE[-1])
-            elif dim==2:
-                ap = map
-                FR = mFR
-                SE = mSE
-
-            fnum = Nmax*subsample
-            for rep in range(0, repeats):
-                dr = np.zeros((fnum, dim))
-                xyz = np.zeros((fnum, dim))
-
-                for i in range(0, fnum-1):
-                    for d in range(0, dim):
-                        dr[i+1,d] = FR[d]*np.random.randn() + ap[d]*dr[i,d]
-
-                for k in range(0, fnum-1):
-                    for kd in range(0, dim):
-                        xyz[k+1, kd] = xyz[k,kd] + dr[k,kd]
-
-                exyz = xyz[::subsample, :]
-                oxyz = exyz - np.ones((exyz.shape[0], 1)) * exyz[0, :] 
-           
-                #including position noise
-                for kd in range(0, dim):
-                    oxyz[:,kd] = oxyz[:,kd] + np.random.randn(len(oxyz[:,kd]))*SE[kd]
-
-                #rotate the trajectories randomly
-                if dim==3:
-                    thetax = np.random.rand()*2*np.pi
-                    Rx = np.array([[1, 0, 0],
-                                   [np.cos(thetax), -np.sin(thetax), 0],
-                                   [0, np.sin(thetax), np.cos(thetax)]])
+                theta = np.random.randn(3)*2*np.pi
+                Rx = np.array([[1, 0, 0],
+                               [np.cos(theta[0]), -np.sin(theta[0]), 0],
+                               [0, np.sin(theta[0]), np.cos(theta[0])]])
       
-                    thetay = np.random.rand()*2*np.pi
-                    Ry = np.array([[np.cos(thetay), 0, np.sin(thetay)],
-                                   [0, 1, 0],
-                                   [-np.sin(thetay), 0, np.cos(thetay)]])
-       
-                    thetaz = np.random.rand()*2*np.pi
-                    Rz = np.array([[np.cos(thetaz), -np.sin(thetaz), 0],
-                                   [np.sin(thetaz), np.cos(thetaz), 0],
-                                   [0, 0, 1]])
+                Ry = np.array([[np.cos(theta[1]), 0, np.sin(theta[1])],
+                               [0, 1, 0],
+                               [-np.sin(theta[1]), 0, np.cos(theta[1])]])
 
-                    Rm = np.dot(Rx, np.dot(Ry, Rz))
-                    rxyz = np.dot(oxyz, Rm) #rotate matrix
+                Rz = np.array([[np.cos(theta[2]), -np.sin(theta[2]), 0],
+                               [np.sin(theta[2]), np.cos(theta[2]), 0],
+                               [0, 0, 1]])
+            
+                Rm = Rx@Ry@Rz
+                rxyz = oxyz@Rm
+        
+            elif dim==2:
+                theta = np.random.randn()*2*np.pi
+                Rm = np.array([[np.cos(theta), -np.sin(theta)],
+                               [np.sin(theta), np.cos(theta)]])
+                rxyz = oxyz@Rm
+        
+            xyss0 = np.column_stack((np.ones(rxyz.shape[0])*count*ss + rep, np.arange(0, len(rxyz))*tlag, rxyz))
+            xys00.append(xyss0)
+        count += 1
+    savename = fr'{savedir}\{names}_sim_APRW.xlsx'
+    sim_tracks = pd.DataFrame(np.vstack(xys00))
+    sim_tracks.to_excel(savename, sheet_name='sim_APRW', index=False)
+    return sim_tracks
 
-                elif dim==2:
-                    theta=np.random.rand()*2*np.pi
-                    Rm = np.array([[np.cos(theta), -np.sin(theta)],
-                                    [np.sin(theta), np.cos(theta)]])
-                    rxyz=np.dot(oxyz,Rm)
+###########################################
 
-                xyss0 = np.column_stack((np.ones(rxyz.shape[0]) * count * ss + rep, np.arange(0, len(rxyz))*tlag, rxyz))
-                xys00.append(xyss0)  # for output to excel
-                simxy.append(xyss0)  # for output variable
-            count = count+1
-
-        pd.DataFrame(np.vstack(xys00)).to_excel(savenames[n], sheet_name='sim_APRW', index=False)
-        n = n+1  
-    return
-
-def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
+def PDF_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
     For a given time lag, it calculates all displacements and distributes them along the given number of bins, up to the maximum displacement assigned.
 
     Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
+        tracks (pd.DataFrame): dataframes of tracks. Tracks must be in order [id,t,x,y,(z)]
+        names (str): name of the track conditions
         timelapse_units (str): time units of the tracks (s, min, h)
         tlag (int): value of the timelag that will be used in the PDF calculation
         savedir (str): path where resulting excels will be saved. Defaults to None
@@ -650,6 +609,11 @@ def PDF_dR(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:i
     returns:
         list: list of lists for each file. Each file list corresponds to two arrays, the first one for the histogram data and the second one for the bins.
     '''
+    ids = np.unique(tracks.index.get_level_values(0))
+    for id in ids:
+        track = tracks.loc[id][['x','y','z']]
+        d_euc = np.linalg.norm(np.asarray(track.loc[tlag:])-np.asarray(track.loc[:len(track)-tlag-1]), axis=1)
+
     if not os.path.exists(savedir):
         os.makedirs(os.path.abspath(savedir))
 
