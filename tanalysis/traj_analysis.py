@@ -93,7 +93,7 @@ def filter_traj(dirname:str, filter_values:dict):
 
     Args:
         dirname (str): path to the original tracks
-        filter_values (dict): dict containing the filter values. Possible filter parameters are: ['track_duration', 'total_distance', 'mean_velocity', 'minmax_velocity']. Filter values are composed of a min and a max value.
+        filter_values (dict): dict containing the filter values. Possible filter parameters are: ['track_duration', 'total_distance', 'mean_velocity']. Filter values are composed of a min and a max value.
 
     Returns:
         tracks: pandas dataframe containing the position information from each track
@@ -107,7 +107,9 @@ def filter_traj(dirname:str, filter_values:dict):
         mean_speed = np.mean(np.linalg.norm(np.diff(ctrack[['x','y','z']], axis=0), axis=-1)/(np.diff(ctrack[['time']], axis=0)))
         track_duration = np.max(ctrack[['time']])-np.min(ctrack[['time']])
         # Compare given filter values to the current track and store only the valid ids
-        comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], filter_values['total_distance'][0]<=total_distance<=filter_values['total_distance'][1], filter_values['mean_velocity'][0]<=mean_speed<=filter_values['mean_velocity'][1]]
+        comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], 
+                      filter_values['total_distance'][0]<=total_distance<=filter_values['total_distance'][1], 
+                      filter_values['mean_velocity'][0]<=mean_speed<=filter_values['mean_velocity'][1]]
         if all(comparison):
             valid_ids.append(id)
         else:
@@ -637,7 +639,7 @@ def PDF_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedi
             if not os.path.isdir(savedir):
                 raise ValueError ("Save directory is not valid")
             savename = f'{os.path.join(savedir,names[name])}_PDF_dR.xlsx'
-            df1 = DataFrame({'bins': bins[:-1], 'hist': hist})
+            df1 = pd.DataFrame({'bins': bins[:-1], 'hist': hist})
             with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
                 df1.to_excel(writer, sheet_name='PDF_dR', index=False)
             name = name+1
