@@ -93,7 +93,8 @@ def filter_traj(dirname:str, filter_values:dict):
 
     Args:
         dirname (str): path to the original tracks
-        filter_values (dict): dict containing the filter values. Possible filter parameters are: ['track_duration', 'total_distance', 'mean_velocity']. Filter values are composed of a min and a max value.
+        filter_values (dict): dict containing the filter values. Possible filter parameters are: ['track_duration', 'total_distance', 'mean_velocity']. 
+                              Filter values are composed of a min and a max value.
 
     Returns:
         tracks: pandas dataframe containing the position information from each track
@@ -138,7 +139,7 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
     min_len = np.inf
     # Find the length of the shortest track
     for id in np.unique(tracks.index.get_level_values(0)):
-        t_len = tracks.loc[id].index[-1]
+        t_len = len(tracks.loc[id])
         if t_len<min_len:
             min_len = t_len
     # Reindex the dataframe to crop all tracks to the same length and fill empty spaces
