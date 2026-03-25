@@ -6,6 +6,11 @@ from scipy.stats import linregress
 from scipy.spatial import ConvexHull
 import matplotlib.pyplot as plt
 import xml.etree.ElementTree as ET
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", category=RuntimeWarning)
+    warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 
 def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     '''
@@ -79,10 +84,16 @@ def get_traj(dirname:str):
     except:         
         print(f'Could not read: {dirname}')
     
-    tracks['frame'] = np.int8(tracks['time']/np.min(np.uint32(np.diff(tracks['time'])))) # Add frame column in dataframe based on time column
-    for id in pd.unique(tracks['id']):
-        min_val = np.min(tracks.loc[tracks['id']==id, 'frame'])
-        tracks.loc[tracks['id']==id, 'frame'] -= min_val # Set starting frame to 0 in all id
+    t_lens = []
+    total_frames = []
+    for id in np.unique(tracks['id']):
+        t_lens.append(len(tracks.loc[tracks['id']==id, 'time']))
+    for t_len in t_lens:
+        frames = np.arange(t_len)
+        for frame in frames:
+            total_frames.append(frame)
+    frames = np.asarray(total_frames).reshape(len(tracks))
+    tracks['frame'] = frames
     tracks = tracks.set_index(['id', 'frame'])    
     name = fname.replace(ext,'')
     return tracks, name
@@ -241,9 +252,9 @@ def ezmsd(xyz:pd.DataFrame) -> np.ndarray:
     dims = len(xyz.shape)
     for tlag in range(1, len(xyz)):
         if dims > 1:
-            msd = np.mean(np.nansum((np.asarray(xyz[tlag:]) - np.asarray(xyz[:-tlag]))**2, axis=-1))
+            msd = np.nanmean(np.sum((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2, axis=-1))
         else:
-            msd = np.mean((np.asarray(xyz[tlag:]) - np.asarray(xyz[:-tlag]))**2)
+            msd = np.nanmean((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2)
         track_msd.append(msd)
     return np.asarray(track_msd)
 
@@ -274,7 +285,7 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         dt = np.unique(np.diff(track, axis=0)[:,0][0])
         xyz = track.iloc[:,slice(1,None,1)]
         msd0 = ezmsd(xyz)
-        final_msds[f'msd_{id}'] = msd0
+        final_msds[f'msd_{id}'] = msd0.astype(np.double)
         regr = linregress(np.log10(np.array(frames[1:])), np.log10(msd0))
         D = abs(regr.slope/(2*len(xyz.columns)))
         diff_coef[f'D_{id}'] = D
@@ -314,6 +325,10 @@ def directionality_tortuosity(tracks:pd.DataFrame, names:str, timelapse_units:st
         xyz = tracks.loc[id].iloc[:,slice(1,None,1)]
         d_euclidean = np.sqrt(np.nansum((xyz.iloc[-1]-xyz.iloc[0])**2, axis=0))
         d_total = np.nansum(np.linalg.norm(np.diff(xyz, axis=0), axis=1))
+        if d_total==0:
+            d_total = 0.00001
+        if d_euclidean==0:
+            d_euclidean = 0.00001
         dir_tort.append([id, d_euclidean/d_total, d_total/d_euclidean])
     df_dir_tort = pd.DataFrame(np.asarray(dir_tort), columns=['id', 'directionality', 'tortuosity'])
 
@@ -439,7 +454,7 @@ def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
             acf = np.mean(np.nansum(dxyz[tlag:]*dxyz[:-tlag], axis=1))
             track_acf.append(acf)
         acf0 = np.asarray(track_acf)
-        final_acfs[f'acfs_{id}'] = np.abs(acf0)
+        final_acfs[f'acfs_{id}'] = np.abs(acf0).astype(np.double)
     mean_acf = np.mean(final_acfs, axis=1)
     std_acf = np.std(final_acfs, axis=1)
     mean_acfs = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-1)*dt, 'acf': mean_acf, 'std_dev': std_acf})
