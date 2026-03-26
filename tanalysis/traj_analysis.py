@@ -9,7 +9,6 @@ import xml.etree.ElementTree as ET
 import warnings
 
 with warnings.catch_warnings():
-    warnings.simplefilter("ignore", category=RuntimeWarning)
     warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 
 def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
@@ -290,7 +289,7 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         D = abs(regr.slope/(2*len(xyz.columns)))
         diff_coef[f'D_{id}'] = D
     mean_msd = np.mean(final_msds, axis=1)
-    std_msd = np.std(final_msds, axis=1)
+    std_msd = np.std(final_msds, axis=1)/np.sqrt(len(final_msds))
     mean_msds = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames))*dt, 'msd': mean_msd, 'std_dev': std_msd})
     #save the file
     if save_results:
@@ -604,9 +603,11 @@ def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, r
             xyss0 = np.column_stack((np.ones(rxyz.shape[0])*count*ss + rep, np.arange(0, len(rxyz))*tlag, rxyz))
             xys00.append(xyss0)
         count += 1
-    savename = fr'{savedir}\{names}_sim_APRW.xlsx'
-    sim_tracks = pd.DataFrame(np.vstack(xys00))
-    sim_tracks.to_excel(savename, sheet_name='sim_APRW', index=False)
+    savename = fr'{savedir}\Simulations\{names}_sim_APRW.xlsx'
+    sim_tracks = pd.DataFrame(np.vstack(xys00), columns=['id', 'time', 'x', 'y', 'z'])
+    #{'id':np.vstack(xys00)[:,0], 'time':np.vstack(xys00)[:,1], 'x':np.vstack(xys00)[:,2], 'y':np.vstack(xys00)[:,3], 'z':np.vstack(xys00)[:,4]}
+    with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+        sim_tracks.to_excel(writer, sheet_name='sim_APRW', index=False)
     return sim_tracks
 
 ###########################################
@@ -743,8 +744,6 @@ def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
                     angle[i]=angle[i]+360
             
             dr = np.sqrt(dxyzr[0]**2+dxyzr[1]**2)
-
-
     return
 
 def fit_PRW(dirname, dt, dim):
