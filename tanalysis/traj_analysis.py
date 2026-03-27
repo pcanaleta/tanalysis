@@ -251,7 +251,11 @@ def ezmsd(xyz:pd.DataFrame) -> np.ndarray:
     dims = len(xyz.shape)
     for tlag in range(1, len(xyz)):
         if dims > 1:
-            msd = np.nanmean(np.sum((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2, axis=-1))
+            msd_sum = np.sum((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2, axis=-1)
+            if all(pd.isnull(msd_sum)):
+                msd = None
+            else:
+                msd = np.nanmean(msd_sum)
         else:
             msd = np.nanmean((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2)
         track_msd.append(msd)
@@ -289,7 +293,7 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         D = abs(regr.slope/(2*len(xyz.columns)))
         diff_coef[f'D_{id}'] = D
     mean_msd = np.mean(final_msds, axis=1)
-    std_msd = np.std(final_msds, axis=1)/np.sqrt(len(final_msds))
+    std_msd = np.std(final_msds, axis=1)/np.sqrt(len(final_msds)) #standard error of the mean (std/sqrt(n))
     mean_msds = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames))*dt, 'msd': mean_msd, 'std_dev': std_msd})
     #save the file
     if save_results:
