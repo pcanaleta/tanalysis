@@ -252,10 +252,7 @@ def ezmsd(xyz:pd.DataFrame) -> np.ndarray:
     for tlag in range(1, len(xyz)):
         if dims > 1:
             msd_sum = np.sum((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2, axis=-1)
-            if all(pd.isnull(msd_sum)):
-                msd = None
-            else:
-                msd = np.nanmean(msd_sum)
+            msd = np.nanmean(msd_sum)
         else:
             msd = np.nanmean((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2)
         track_msd.append(msd)
@@ -454,12 +451,12 @@ def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         dxyz = np.diff(xyz, axis=0)
         track_acf = []
         for tlag in range(1, len(xyz)-1):
-            acf = np.mean(np.nansum(dxyz[tlag:]*dxyz[:-tlag], axis=1))
+            acf = np.nanmean(np.sum(dxyz[tlag:]*dxyz[:-tlag], axis=1))
             track_acf.append(acf)
         acf0 = np.asarray(track_acf)
         final_acfs[f'acfs_{id}'] = np.abs(acf0).astype(np.double)
     mean_acf = np.mean(final_acfs, axis=1)
-    std_acf = np.std(final_acfs, axis=1)
+    std_acf = np.std(final_acfs, axis=1)/np.sqrt(len(final_acfs))
     mean_acfs = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-1)*dt, 'acf': mean_acf, 'std_dev': std_acf})
     #save the file
     if save_results:
@@ -616,7 +613,7 @@ def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, r
 
 ###########################################
 
-def PDF_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
+def PDF_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, binn:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
     For a given time lag, it calculates all displacements and distributes them along the given number of bins, up to the maximum displacement assigned.
@@ -630,45 +627,26 @@ def PDF_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedi
         save_results (bool): save excel with the results of the function. Defaults to True
 
     returns:
-        list: list of lists for each file. Each file list corresponds to two arrays, the first one for the histogram data and the second one for the bins.
+        df_PDF: dataframe containing the information of the bins and the histogram created
     '''
     ids = np.unique(tracks.index.get_level_values(0))
+    file_d_euc = []
     for id in ids:
         track = tracks.loc[id][['x','y','z']]
         d_euc = np.linalg.norm(np.asarray(track.loc[tlag:])-np.asarray(track.loc[:len(track)-tlag-1]), axis=1)
+        file_d_euc.append(np.mean(d_euc))
+    bin_distr = np.linspace() ##################################################
+    hist, bins = np.histogram(file_d_euc, bins=bin_distr)
+    df_PDF = pd.DataFrame({'bins': bins[:,-1], 'hist':hist})
+    if save_results:
+        if not os.path.exists(savedir):
+            os.makedirs(os.path.abspath(savedir))
+        savename = f'{os.path.join(savedir, names)}_PDF_dR.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df_PDF.to_excel(writer, sheet_name='PDF_dR', index=False)
+    return df_PDF
 
-    if not os.path.exists(savedir):
-        os.makedirs(os.path.abspath(savedir))
-
-    all_d_euc = []
-    tracks_d_euc = []
-    for file in tracks:
-        file_d_euc = []
-        #calculate PDF_dR for each track in the file
-        for track in file:
-            d_euc = np.linalg.norm(track[tlag:,2:]-track[:-tlag,2:], axis=-1)
-            file_d_euc.append(np.mean(d_euc))
-            all_d_euc.append(np.mean(d_euc))
-        tracks_d_euc.append(np.array(all_d_euc))
-
-    _, all_bins = np.histogram(all_d_euc, bins='auto')
-    name = 0
-    for file in tracks_d_euc:
-        hist, bins = np.histogram(file, all_bins)
-        #save PDF_dR into excel files, if multiple files have been readed, multiple excel files will be created
-        if save_results:
-            if not os.path.isdir(savedir):
-                raise ValueError ("Save directory is not valid")
-            savename = f'{os.path.join(savedir,names[name])}_PDF_dR.xlsx'
-            df1 = pd.DataFrame({'bins': bins[:-1], 'hist': hist})
-            with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-                df1.to_excel(writer, sheet_name='PDF_dR', index=False)
-            name = name+1
-    return
-
-################################################
-
-def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
+def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:int, binn:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density funtion (PDF) of the angle. 
     Given a time lag, the function calculates the angle turned (between 0 and 180º) between the current position and the position one time lag after.
@@ -684,10 +662,10 @@ def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tl
     if not os.path.exists(savedir):
         os.makedirs(os.path.abspath(savedir))
 
-
     all_files_PDF_dtheta = []
+    all_files = []
     bin_distr = np.linspace(0, 180, binn)
-
+    dt = 2
     for file in all_files:
         angle = []
         #calculate PDF_dtheta for each track in the file
@@ -704,14 +682,16 @@ def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tl
     
     #save PDF_dtheta into excel files, if multiple files have been readed, multiple excel files will be created
     name = 0
-    if save_xlsx==True:
+    if save_results==True:
         for file in all_files_PDF_dtheta:
-            savename = f'{os.path.join(savedir,name_list[name])}_PDF_dtheta_{tlag}{tunit}.xlsx'
-            df = DataFrame({'bins': file[1], 'PDF_dtheta': file[0]})
+            savename = f'{os.path.join(savedir,names)}_PDF_dtheta_{tlag}{timelapse_units}.xlsx'
+            df = pd.DataFrame({'bins': file[1], 'PDF_dtheta': file[0]})
             df.to_excel(savename, sheet_name='PDF_dtheta', index=False)
             name = name+1
 
     return
+
+################################################
 
 def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
     '''
@@ -784,7 +764,7 @@ def fit_PRW(dirname, dt, dim):
         
         psse.append(params)
         savename = f'{os.path.join(savedir, name_list[name])}_PRW_params.xlsx'
-        savedf = DataFrame({'P':params[:,0], 'S':params[:,1], 'SE':params[:,2]})
+        savedf = pd.DataFrame({'P':params[:,0], 'S':params[:,1], 'SE':params[:,2]})
         savedf.to_excel(savename, sheet_name='params', index=False)
         name = name+1
         
