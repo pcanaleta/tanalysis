@@ -114,8 +114,8 @@ def filter_traj(dirname:str, filter_values:dict):
     valid_ids = []
     for id in np.unique(df.index.get_level_values(0)):
         ctrack = df.loc[id,:]
-        total_distance = np.sum(np.linalg.norm(np.diff(ctrack[['x','y','z']], axis=0), axis=-1))
-        mean_speed = np.mean(np.linalg.norm(np.diff(ctrack[['x','y','z']], axis=0), axis=-1)/(np.diff(ctrack[['time']], axis=0)))
+        total_distance = np.nansum(np.abs(np.diff(np.linalg.norm(ctrack[['x','y','z']], axis=1), axis=0)))
+        mean_speed = np.nanmean(np.abs(np.diff(np.linalg.norm(ctrack[['x','y','z']], axis=1), axis=0))/(np.diff(ctrack[['time']], axis=0)))
         track_duration = np.max(ctrack[['time']])-np.min(ctrack[['time']])
         # Compare given filter values to the current track and store only the valid ids
         comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], 
@@ -454,7 +454,7 @@ def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
             acf = np.nanmean(np.sum(dxyz[tlag:]*dxyz[:-tlag], axis=1))
             track_acf.append(acf)
         acf0 = np.asarray(track_acf)
-        final_acfs[f'acfs_{id}'] = np.abs(acf0).astype(np.double)
+        final_acfs[f'acfs_{id}'] = acf0.astype(np.double)
     mean_acf = np.mean(final_acfs, axis=1)
     std_acf = np.std(final_acfs, axis=1)/np.sqrt(len(final_acfs))
     mean_acfs = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-1)*dt, 'acf': mean_acf, 'std_dev': std_acf})
