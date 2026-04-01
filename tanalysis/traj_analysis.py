@@ -62,6 +62,27 @@ def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     df.to_excel(savename, sheet_name='trajectories', index=False)  
     return
 
+def cohen_d(group_a:pd.DataFrame, group_b:pd.DataFrame):
+    '''
+    This function takes as arguments two dataframes and calculates the size effect between them.
+
+    Args:
+        group_a (pd.DataFrame): one of the groups to calculate cohen's d value
+        group_b (pd.DataFrame): one of the groups to calculate cohen's d value
+    
+    Returns:
+        d_value: float value of calculated cohen's d effect size
+    '''
+    mean_a = np.nanmean(group_a)
+    mean_b = np.nanmean(group_b)
+    std_a = np.std(group_a)
+    std_b = np.std(group_b)
+    n_a = len(group_a)
+    n_b = len(group_b)
+    stdp = np.sqrt(((n_a-1)*std_a**2 + (n_b-1)*std_b**2)/(n_a+n_b-2))
+    d_value = (np.abs(mean_a - mean_b))/stdp
+    return d_value
+
 def get_traj(dirname:str):
     '''
     This function gets the tracks in an excel file and crops them in order to have all tracks with the same length as the shortest track.
