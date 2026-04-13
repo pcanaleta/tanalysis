@@ -350,8 +350,8 @@ def directionality_tortuosity(tracks:pd.DataFrame, names:str, timelapse_units:st
             d_total = 0.00001
         if d_euclidean==0:
             d_euclidean = 0.00001
-        dir_tort.append([id, d_euclidean/d_total, d_total/d_euclidean])
-    df_dir_tort = pd.DataFrame(np.asarray(dir_tort), columns=['id', 'directionality', 'tortuosity'])
+        dir_tort.append([id, d_euclidean/d_total, d_total/d_euclidean, d_total, d_euclidean])
+    df_dir_tort = pd.DataFrame(np.asarray(dir_tort), columns=['id', 'directionality', 'tortuosity', 'total distance', 'net distance'])
 
     # save results in excel file
     if save_results:
