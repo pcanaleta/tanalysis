@@ -299,6 +299,7 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
     ids = np.unique(tracks.index.get_level_values(0))
     frames = tracks.loc[ids[0]].index
     final_msds = pd.DataFrame(data=np.arange(1,len(frames)-1), index=np.arange(1,len(frames)-1), columns=['frame']) 
+    alpha_coef = pd.DataFrame(data=['alpha'], index=[ids[0]], columns=['alpha_coef'])
     diff_coef = pd.DataFrame(data=['D'], index=[ids[0]], columns=['diff_coef'])
     # Calculate msd for each track in the file
     for id in ids:
@@ -307,8 +308,10 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         xyz = track.iloc[:,slice(1,None,1)]
         msd0 = ezmsd(xyz)
         final_msds[f'msd_{id}'] = msd0.astype(np.double)
-        regr = linregress(np.log10(np.array(frames[1:-1])), np.log10(msd0))
-        D = abs(regr.slope/(2*len(xyz.columns)))
+        regr = linregress(np.log10(np.array(frames[1:-1])*dt), np.log10(msd0))
+        alpha = regr.slope
+        D = regr.intercept/(2*len(track.iloc[0, slice(1, None, 1)]))
+        alpha_coef[f'alpha_{id}'] = alpha
         diff_coef[f'D_{id}'] = D
     mean_msd = np.mean(final_msds, axis=1)
     std_msd = np.std(final_msds, axis=1)/np.sqrt(len(final_msds)) #standard error of the mean (std/sqrt(n))
@@ -321,8 +324,9 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
             mean_msds.to_excel(writer, sheet_name='mean_msd', index=False)
             final_msds.to_excel(writer, sheet_name='track_msd', index=False)
+            alpha_coef.to_excel(writer, sheet_name='alpha_coef', index=False)
             diff_coef.to_excel(writer, sheet_name='diff_coef', index=False)
-    return final_msds, mean_msds, diff_coef
+    return final_msds, mean_msds, alpha_coef, diff_coef
 
 def directionality_tortuosity(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
@@ -632,7 +636,7 @@ def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, r
         sim_tracks.to_excel(writer, sheet_name='sim_APRW', index=False)
     return sim_tracks
 
-def PDF(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, binn:int, savedir:str="", save_results:bool=True):
+def PDF(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
     For a given time lag, it calculates all displacements and distributes them along the given number of bins, up to the maximum displacement assigned.
@@ -658,8 +662,8 @@ def PDF(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, binn:int,
         dxyztau = np.asarray(track.loc[tlag:])-np.asarray(track.loc[:len(track)-tlag-1])
         norm = np.linalg.norm(dxyz, axis=1)*np.linalg.norm(dxyztau, axis=1)
         norm[norm==0] = np.nan
-        theta = np.arccos(np.divide(np.vecdot(dxyz,dxyztau),(norm)))/np.pi*180 #Problem when dividing by 0
-        file_d_euc.append(np.mean(d_euc))
+        theta = np.arccos(np.divide(np.vecdot(dxyz,dxyztau),(norm)))/np.pi*180
+        file_d_euc.append(np.nanmean(d_euc))
         file_angle.append(np.nanmean(theta))
     df_PDF = pd.DataFrame({'id': ids, 'net_dist':file_d_euc, 'mean_angle':file_angle})
     if save_results:
@@ -685,9 +689,6 @@ def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
         savedir = os.path.abspath(fr'{dirname}\Results')
         if not os.path.exists(savedir):
             os.makedirs(savedir)
-    
-    all_files_PDF_dtheta = []
-    bin_distr = np.linspace(0, 360, binn)
 
     plt.figure()
     for file in all_files:
