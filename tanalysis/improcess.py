@@ -3,21 +3,15 @@ import tifffile as tiff
 import numpy as np
 import shutil
 import liffile as lif
-import cupy as cp
-from cupyx.scipy import ndimage
 from skimage import measure, morphology
+from readlif.reader import LifFile # type: ignore
+from cellpose import io, models, train, denoise # type: ignore
 
 try:
-    from readlif.reader import LifFile # type: ignore
-    READLIF = True
+    import cupy as cp
+    from cupyx.scipy import ndimage
 except:
-    READLIF = False
-
-try:
-    from cellpose import io, models, train, denoise # type: ignore
-    CELLPOSE = True
-except:
-    CELLPOSE = False
+    raise('ModuleError: CuPy module is necessary for GPU acceleration. Please, install the correspondig CuPy version to the current Cuda installation (f.e.: <pip install cupy-cuda12x>)')
 
 def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     '''
@@ -70,20 +64,17 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
             im_list.append(image)
         #For lif files
         elif ext==".lif":
-            if not READLIF:
-                print('ERROR: cannot import liffile, please use: pip install -U readlif[all]')
-            else:
-                for i in range(0,10):
-                    try:
-                        im = lif.imread(file, image=i)
-                        im_list.append(im)
-                    except:
-                        continue
-                lif_file = LifFile(file)
-                for image_0 in lif_file.get_iter_image():
-                    im_info['scale'] = image_0.info['scale']
-                    if tiles:
-                        im_info['mosaic_position'] = image_0.info['mosaic_position']
+            for i in range(0,10):
+                try:
+                    im = lif.imread(file, image=i)
+                    im_list.append(im)
+                except:
+                    continue
+            lif_file = LifFile(file)
+            for image_0 in lif_file.get_iter_image():
+                im_info['scale'] = image_0.info['scale']
+                if tiles:
+                    im_info['mosaic_position'] = image_0.info['mosaic_position']
         else:
             continue
 
@@ -106,10 +97,7 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
     Raises:
         ImportError: if cellpose package is not installed
         ValueError: if the image/s selected are not 2D or 3d
-    '''
-    if not CELLPOSE:
-        raise ImportError('ERROR: Cellpose package is not installed, please use: pip install cellpose[all]')
-    
+    '''    
     io.logger_setup()
 
     model = models.CellposeModel(gpu=True)
