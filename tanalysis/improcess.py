@@ -2,26 +2,22 @@ import os
 import tifffile as tiff
 import numpy as np
 import shutil
-from tqdm import tqdm
 import liffile as lif
+import cupy as cp
+from cupyx.scipy import ndimage
+from skimage import measure, morphology
 
 try:
-    from readlif.reader import LifFile
+    from readlif.reader import LifFile # type: ignore
     READLIF = True
 except:
     READLIF = False
 
 try:
-    from cellpose import io, models, train, denoise
+    from cellpose import io, models, train, denoise # type: ignore
     CELLPOSE = True
 except:
     CELLPOSE = False
-
-try:
-    import cupy as cp
-    CUPY = True
-except:
-    CUPY = False
 
 def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     '''
@@ -57,62 +53,43 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     #List all given files
     file_list = []
     if os.path.isfile(dirname):
-        file_list.append(dirname)
-    elif os.path.isdir(dirname):
-        if len(os.listdir(dirname)) == 0:
-            raise ValueError('ERROR: submitted directory is empty')
-        else:
-            for fname in os.listdir(dirname):
-                file_list.append(os.path.join(dirname,fname))
+        file_list.append(dirname)              
     else:
         raise ValueError('ERROR: no directory or file submitted')
     
     #Read all files in file_list
     i=0
-    for file in tqdm(file_list, 'Reading submitted files', ncols=100):
+    for file in file_list:
         ext = os.path.splitext(file)[-1].lower()
         file_name = os.path.split(file)[-1].replace(ext, "")
         im_name.append(f'{file_name.replace(ext, '')}-{i}')
         i=i+1
         #For tiff files
         if ext==".tif" or ext==".tiff":
-            if gpu==True and CUPY==True:
-                image = cp.asarray(tiff.imread(file))
-            elif gpu==True and CUPY==False:
-                print('Cupy not installed, please, install cupy and cuda to use GPU. https://cupy.dev/')
-                print('Using CPU')
-                image = np.asarray(tiff.imread(file))
-            elif gpu==False:
-                image = np.asarray(tiff.imread(file))
+            image = np.asarray(tiff.imread(file))
             im_list.append(image)
         #For lif files
         elif ext==".lif":
             if not READLIF:
-                raise ImportError('ERROR: cannot import liffile, please use: pip install -U readlif[all]')
+                print('ERROR: cannot import liffile, please use: pip install -U readlif[all]')
             else:
                 for i in range(0,10):
                     try:
                         im = lif.imread(file, image=i)
-                        if gpu==True and CUPY==True:
-                            im = cp.asarray(im)
-                        elif gpu==True and CUPY==False:
-                            print('Cupy not installed, please, install cupy and cuda to use GPU. https://cupy.dev/')
-                            print('Using CPU')
                         im_list.append(im)
                     except:
                         continue
                 lif_file = LifFile(file)
                 for image_0 in lif_file.get_iter_image():
                     im_info['scale'] = image_0.info['scale']
-                    if tiles==True:
+                    if tiles:
                         im_info['mosaic_position'] = image_0.info['mosaic_position']
         else:
-            raise ValueError('ERROR: submited file does not have a supported extension (.tif, .tiff, .lif)')
+            continue
 
-    print('All files read!')
     return im_list, im_name, im_info
 
-def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:bool=None,):
+def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:str="",):
     '''
     This function segmentates the images with the model selected. The segmented images are saved in the specified directory. 
     
@@ -137,7 +114,7 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
 
     model = models.CellposeModel(gpu=True)
 
-    if modelpath!=None:
+    if os.path.isfile(modelpath):
         model = models.CellposeModel(gpu=True, pretrained_model=modelpath)
 
     if dim == 3:
@@ -154,7 +131,7 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
             os.makedirs(temp_savedir)
             print(temp_savedir)
         for time_frame in image:
-            masks, flows, styles = model.eval(time_frame, do_3D=do_3D, z_axis=0)
+            masks, flows, styles = model.eval(time_frame, do_3D=do_3D, z_axis=0, normalize={'percentile':[1,100]})
             io.save_masks(time_frame, masks, flows, f'{name}_T{timer}.tif', tif=do_3D, png=not(do_3D), savedir=temp_savedir)
             timer=timer+1 
     return temp_savedir
@@ -171,21 +148,18 @@ def concatenate(dirname, remove_original=False):
         ValueError: if path given is not a folder
     '''
     if os.path.isdir(dirname):
-        images, dim, names = imread(dirname)
+        images, names, info = imread(dirname)
         newname = f'{os.path.abspath(os.path.join(dirname,names[0].replace('_T0_cp_masks','')))}.tiff'
         im_concat = np.stack(images, 0)
         
-        if remove_original == True:
+        if remove_original:
             try:
                 shutil.rmtree(dirname)
                 os.makedirs(dirname)
             except Exception as e:
                 print('Failed to delete %s. Reason: %s' % (dirname, e))
         
-        if dim == 3:
-            axes = 'TZYX'
-        elif dim == 2:
-            axes = 'TYX'
+        axes = 'TZYX'
         
         tiff.imwrite(
             newname, 
@@ -200,62 +174,93 @@ def concatenate(dirname, remove_original=False):
     
     return
 
-def cellposeseg_bigdata(dirname, zarr_path, chunks={0:256,1:256,2:'auto'}, blocksize={0:256,1:256,2:'auto'}, time_frames=False, model=None, do_3D=True):
-
-    if not CELLPOSE:
-        raise ImportError('ERROR: Cellpose package is not installed, please use: pip install cellpose')
-
-    from cellpose.contrib.distributed_segmentation import distributed_eval, numpy_array_to_zarr
+def LoG(sigma_x:float, sigma_y:float, sigma_z:float):
+    '''
+    The function calculates the laplacian of the gaussian of the image in order to find the borders of the objects present in the photo.
+    It only accepts 3D images (for now).
     
-    images, dim, im_name = imread(dirname, n_images=1)
+    Params:
+        sigma_x (float): float value for deviation in x axis 
+        sigma_y (float): float value for deviation in y axis 
+        sigma_z (float): float value for deviation in z axis 
+    '''
+    n = 7
+    z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
+    z_filter = cp.exp(-(z*z/(2*sigma_z**2)))
+    y_filter = cp.exp(-(y*y/(2*sigma_y**2)))
+    x_filter = cp.exp(-(x*x/(2*sigma_x**2)))
+    final_filter = (1/(sigma_x*sigma_y*sigma_z*(2*np.pi)**(3/2)))*((1-x*x/(sigma_x**2))/(sigma_x**2)+(1-y*y/(sigma_y**2))/(sigma_y**2)+(1-z*z/(sigma_z**2))/(sigma_z**2))*(z_filter*x_filter*y_filter)
+    return final_filter
 
-    #convert the numpy array to a zarr
-
-    if time_frames == True:
-        im_tf = images
-        dim = dim+1
-
-    image_names = []
-    for j in range(0, len(im_name)):
-        names = []
-        for i in range(0, len(im_tf[j])):
-            names.append(f'{im_name[j]}_T{i}')
-        image_names.append(names)
-
-    data_zarr=[]
+def LoG_convolve(img:np.ndarray, sigma_x:float, sigma_y:float, sigma_z:float):
+    '''
+    The function creates and convolves a kernel to the image in order to apply the Laplacian of Gaussian filter to the image. Borders of the objects in the image 
+    are marked after applying the kernel.
     
-    for k in range(0,len(im_tf)):
-        for image in im_tf:
-            data_zarr.append(numpy_array_to_zarr(zarr_path, image[k], chunks))
+    Params:
+        img (np.ndarray): original image where the kernel will be convolved
+        sigma_x (float): value for deviation in x axis
+        sigma_y (float): value for deviation in y axis
+        sigma_z (float): value for deviation in z axis
+    '''
+    filter_log = LoG(sigma_x, sigma_y, sigma_z)
+    image = ndimage.convolve(img, filter_log)
+    image = cp.square(image)
+    return cp.asarray(image)
 
-    #parametrize cellpose
-    if model==None:
-        model_kwargs = {'gpu':True, 'model_type':'cyto3'}
-    else:
-        model_kwargs = {'gpu':True, 'pretrained_model':os.path.abspath(model)}
+def fit_gaussian(sigma_x:float, sigma_y:float, sigma_z:float):
+    '''
+    This function creates a Gaussian kernel using the given sigma values.
 
-    eval_kwargs = {'diameter':30,
-                   'z_axis':0,
-                   'channels':[0,0],
-                   'do_3D':do_3D}
+    Params:
+        sigma_x (float): value for deviation in x axis
+        sigma_y (float): value for deviation in y axis
+        sigma_z (float): value for deviation in z axis    
+    '''
+    n = 7
+    z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
+    z_filter = cp.exp(-(z*z/(2*sigma_z**2)))
+    y_filter = cp.exp(-(y*y/(2*sigma_y**2)))
+    x_filter = cp.exp(-(x*x/(2*sigma_x**2)))
+    final_filter = (x_filter*y_filter*z_filter)/(sigma_x*sigma_y*sigma_z*(2*np.pi)**(3/2))
+    return final_filter
+
+def label_cells(image:np.ndarray, sigmas:list, th:float):
+    '''
+    This function will create a labeled image where each detected cell will have a different gray level value assigned.
     
-    #define compute resources for local workstation
-    cluster_kwargs = {
-        'n_workers':1,
-        'ncpus':8,
-        'memory_limit':'64GB',
-        'threads_per_worker':1
-    }
+    Params:
+        image (np.ndarray): 3D image where cells will be labeled
+        sigmas (list[float]): list of float sigma values
+        th (float): threshold value used in the process. It depends on the intensity of the image
+    '''
+    img = cp.array(np.double(image))
 
-    #segmentation
-    for j in range(0, len(data_zarr)):
-        segments, boxes = distributed_eval(
-            input_zarr=data_zarr[j],
-            blocksize=blocksize,
-            write_path=f'{os.path.join(dirname,im_name[j])}.zarr',
-            model_kwargs=model_kwargs,
-            eval_kwargs=eval_kwargs,
-            cluster_kwargs=cluster_kwargs
-    )
+    gaussian = fit_gaussian(*sigmas)
+    img = ndimage.convolve(img, gaussian)
+    th1 = cp.max(img)*th
+    img_th1 = img>th1
 
-    return
+    img = LoG_convolve(img, *sigmas)
+    th2 = cp.max(img)*th
+    img_th2 = img>th2
+
+    img_th1 = cp.asnumpy(img_th1)
+    img_th2 = cp.asnumpy(img_th2)
+
+    img = img_th1 ^ img_th2
+    img = morphology.dilation(img)
+    img = morphology.erosion(img)
+    img = morphology.remove_small_holes(img)
+    img_r1 = morphology.remove_small_objects(img)
+
+    img = cp.asarray(np.double(img_r1))
+    img = LoG_convolve(img, *sigmas)
+    img = cp.asnumpy(img)
+    th3 = np.max(img)*th
+    img_th3 = img>th3
+    img_r2 = img_r1 ^ img_th3
+    img = morphology.erosion(img_r2)
+    img = morphology.remove_small_objects(img)
+    img = measure.label(img)
+    return img

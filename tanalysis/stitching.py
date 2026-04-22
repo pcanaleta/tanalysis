@@ -1,6 +1,10 @@
 import numpy as np
-from tqdm import tqdm
-
+from tqdm import tqdm # type:ignore
+try:
+    import cupy as cp # type: ignore
+    CUPY = True
+except:
+    CUPY = False
 ### Translation Computation ###
 def pcm(image1:np.ndarray, image2:np.ndarray):
     """
@@ -13,14 +17,20 @@ def pcm(image1:np.ndarray, image2:np.ndarray):
     Returns:
         PCM (ndArray): 2D peak correlation array with the same size as the original images
     """
-    assert image1.ndim == image2.ndim == 2
-    assert image1.shape == image2.shape
-    F1 = np.fft.fft2(image1)
-    F2 = np.fft.fft2(image2)
-    FC = F1 * np.conjugate(F2)
-    PCM = np.fft.ifft2(FC/np.abs(FC))
-    del FC,F1,F2
-    return PCM.real.astype(np.float32)
+    if CUPY:
+        F1 = cp.fft.fft2(image1)
+        F2 = cp.fft.fft2(image2)
+        FC = F1 * cp.conjugate(F2)
+        PCM = cp.fft.ifft2(FC/cp.abs(FC))
+        PCM = cp.real(PCM)
+        PCM = cp.array(PCM, dtype=np.float32)
+    else:
+        F1 = np.fft.fft2(image1)
+        F2 = np.fft.fft2(image2)
+        FC = F1 * np.conjugate(F2)
+        PCM = np.fft.ifft2(FC/np.abs(FC))
+        PCM = np.float32(np.real(PCM))
+    return PCM
 
 def multiPeakMax(PCM:np.ndarray):
     """
@@ -32,9 +42,15 @@ def multiPeakMax(PCM:np.ndarray):
     Returns:
         tuple: array of n tuples (x,y,val) where x,y correspond to the peak location described in matrix indices
     """
-    row, col = np.unravel_index(np.argsort(np.ravel(PCM)), PCM.shape)
-    vals = PCM[row[::-1], col[::-1]]
-    return np.array((row[::-1], col[::-1], vals))
+    if CUPY:
+        row, col = cp.unravel_index(cp.argsort(cp.ravel(PCM)), cp.shape(PCM))
+        vals = PCM[row[::-1], col[::-1]]
+        peaks = cp.array((row[::-1], col[::-1], vals))
+    else:
+        row, col = np.unravel_index(np.argsort(np.ravel(PCM)), PCM.shape)
+        vals = PCM[row[::-1], col[::-1]]
+        peaks = np.array((row[::-1], col[::-1], vals))
+    return peaks
 
 def ncc(image1:np.ndarray, image2:np.ndarray):
     """
@@ -53,6 +69,7 @@ def ncc(image1:np.ndarray, image2:np.ndarray):
     n = np.dot(I1 - np.mean(I1), I2 - np.mean(I2))
     d = np.linalg.norm(I1 - np.mean(I1)) * np.linalg.norm(I2 - np.mean(I2))
     del I1,I2
+    np.seterr(divide='ignore', invalid='ignore')
     return n/d
 
 def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
@@ -74,25 +91,29 @@ def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     rowend = int(max(0, min(row+H, H, key=int), key=int))
     return image[rowstart:rowend, colstart:colend]
 
-def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, rowmin, rowmax, colmin, colmax, n=8):
+def interpretTranslation(image1:np.ndarray, image2:np.ndarray, rowin:int, colin:int, n:int=8):
     """
-    This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, which will correspond to the translation between the two images
+    This function computes all the possible coordinate combinations when overlapping two images and extracts the set of coordinates with the highest ncc value, 
+    which will correspond to the translation between the two images
 
     Args:
         image1 (ndArray): 2D image array
         image2 (ndArray): 2D image array
-        xin (int): row index coordinate
-        yin (int): column index coordinate 
-        perc_threshold (int): maximum accepted percentage of overlapping between the two images
+        rowin (int): row where the max peak is located
+        colin (int): col where the max peak is located
+        n (int): number of peaks to verify
 
     Returns:
         ndArray: tuple containing the ncc,x,y of the translation between image1 and image2
     """
-    assert image1.shape == image2.shape
-    _ncc = -np.inf
     x = 0
     y = 0
-    H,W = image1.shape
+    if CUPY:
+        _ncc = -cp.inf
+        H,W = cp.shape(image1)
+    else:
+        _ncc = -np.inf
+        H,W = np.shape(image1)
 
     rowmagss = [rowin, H-rowin]
     colmagss = [colin, W-colin]
@@ -102,20 +123,28 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
             for rowsign in [-1,1]:
                 for colsign in [-1,1]:
                     _poss.append([rowmag*rowsign, colmag*colsign])
-    poss = np.array(_poss)
+    if CUPY:
+        poss = cp.array(_poss)
+    else:
+        poss = np.array(_poss)
     valid_ind = (
-        (rowmin < poss[:, 0, :])
-        & (poss[:, 0, :] < rowmax)
+        (-H < poss[:, 0, :])
+        & (poss[:, 0, :] < H)
         & (poss[:, 0, :] != 0)
-        & (colmin < poss[:, 1, :])
-        & (poss[:, 1, :] < colmax)
+        & (-W < poss[:, 1, :])
+        & (poss[:, 1, :] < W)
         & (poss[:, 1, :] != 0)
-    )  
-    valid_ind = np.any(valid_ind, axis=0)
+    )
+    if CUPY:
+        valid_ind = cp.any(valid_ind, axis=0)
+        inds = cp.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]
+    else:
+        valid_ind = np.any(valid_ind, axis=0)
+        inds = np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]
 
-    for pos in np.moveaxis(poss[:,:,valid_ind], -1, 0)[:int(n)]:
+    for pos in inds:
         for rowval, colval in pos:
-            if (colmin <= colval) and (colval <= colmax) and (rowmin <= rowval) and (rowval <= rowmax):
+            if (-W <= colval) and (colval <= W) and (-H <= rowval) and (rowval <= H):
                 subI1 = extractOverlapSubregion(image1, rowval, colval)
                 subI2 = extractOverlapSubregion(image2, -rowval, -colval)
                 ncc_val = ncc(subI1, subI2)
@@ -124,26 +153,41 @@ def interpretTranslation(image1: np.ndarray, image2: np.ndarray, rowin, colin, r
                     x = int(rowval)
                     y = int(colval)
     del subI1, subI2
-    return np.asarray([_ncc,x,y])
+    if CUPY:
+        max_peak = cp.asarray([_ncc,x,y])
+    else:
+        max_peak = np.asarray([_ncc,x,y])
+    return max_peak
 
-def pciam(image1:np.ndarray, image2:np.ndarray, n=8):
+def pciam(image1:np.ndarray, image2:np.ndarray, n:int=8):
     """
-    This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes the coordinates of the peaks for each peak
+    This function finds the north and west translation between two images. It performs the PCM between the images, extracts n peaks from the PCM and interpretes 
+    the coordinates of the peaks for each peak
 
     Args:
         image1 (ndArray): 2D image array
         image2 (ndArray): 2D image array
+        n (int): number of peaks to verify
 
     Returns:
         ndArray: tuple containing the peak with the max ncc value (ncc, x, y)
     """
+    assert image1.ndim == image2.ndim == 2
+    assert image1.shape == image2.shape
+    if CUPY:
+        image1 = cp.asarray(image1)
+        image2 = cp.asarray(image2)
+        H, W = cp.shape(image1)
+    else:
+        H, W = np.shape(image1)
     PCM = pcm(image1, image2)
-    H, W = np.shape(image1)
     rowin, colin, _ = multiPeakMax(PCM)
-    max_peak = np.asarray(interpretTranslation(image1, image2, rowin, colin, -H, H, -W, W, n))
+    max_peak = interpretTranslation(image1, image2, rowin, colin, n)
+    if CUPY:
+        max_peak = cp.asnumpy(max_peak)
     return max_peak
 
-def make_grid(im_list, positions):
+def make_grid(im_list:list, positions:tuple):
     '''
     This function converts the resulting image list from the imread function to a list of dictionaries where each dictionary corresponds to a timeframe. 
     The keys in the dictionary correspond to the row/col position of the tile assigned to the key
@@ -167,16 +211,20 @@ def make_grid(im_list, positions):
                 grid[f'{pos[1]}{pos[0]}']=tile
             img.append(grid)
         grid_list.append(img)
+    del im_list
     return grid_list, nrow, ncol
 
-def translationComputation(imgs, positions, n=8, n_frames=20) -> np.ndarray:
+def translationComputation(imgs:list, positions:tuple, n:int=8, n_frames:int=20):
     """
-    This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image. The function calculates the translation values drow, rr, dcol, rc which correspond to: vertical translation, error in vertical translation,
-    horizontal translation, error in horizontal translation.
+    This is the final function to obtain the translation vectors for all the tiles to obtain the resulting image. The function calculates the 
+    translation values drow, rr, dcol, rc which correspond to: vertical translation, error in vertical translation, horizontal translation, 
+    error in horizontal translation.
 
     Args:
         imgs (ndArray): array of tiles with shape (t,m,z,x,y)
         positions (list): list of tuples containing the position of the tiles
+        n (int): number of peaks to verify
+        n_frames (int): number of frames where translation vectors will be calculated
 
     Returns:
         translations_list: list of translation values
@@ -186,13 +234,16 @@ def translationComputation(imgs, positions, n=8, n_frames=20) -> np.ndarray:
     
     #Finding the peaks for some t and z
     translations_list = []
+    max_img_frames = len(imgs[0])
+    max_z = len(imgs[0][0])
+    del imgs
     for img in grid_list:
         translations = []
-        if n_frames>len(imgs[0]):
-            print(f'The number of frames selected is bigger than the frames in the image. Using {len(imgs[0])} frames instead')
-        for t in tqdm(range(0, len(imgs[0]), int(len(imgs[0])/n_frames)), 'Calculating translation vectors'):
+        if n_frames>max_img_frames:
+            print(f'The number of frames selected is bigger than the frames in the image. Using {max_img_frames} frames instead')
+        for t in tqdm(range(0, max_img_frames, int(max_img_frames/n_frames)), 'Calculating translation vectors'):
             grid_ = img[t]
-            for z in range(0, len(imgs[0][0]), int(len(imgs[0][0])/5)):
+            for z in range(0, max_z, int(max_z/5)):
                 Tvcol=[]
                 Throw=[]
                 Tvrow=[]
@@ -231,16 +282,23 @@ def translationComputation(imgs, positions, n=8, n_frames=20) -> np.ndarray:
         print('All vectors calculated!')
         arr_translations = np.asarray(translations)
         #We should not take in consideration when values are 0
-        drow, rr, dcol, rc = int(np.median(arr_translations[np.nonzero(arr_translations[:,0]),0])), int(np.median(arr_translations[np.nonzero(arr_translations[:,1]),1])), int(np.median(arr_translations[np.nonzero(arr_translations[:,2]),2])), int(np.median(arr_translations[np.nonzero(arr_translations[:,3]),3]))
-        translations_list.append([drow, rr, dcol, rc])
-        print(translations_list)
+        try:
+            drow = int(np.median(arr_translations[np.nonzero(arr_translations[:,0]),0]))
+            rr = int(np.median(arr_translations[np.nonzero(arr_translations[:,1]),1]))
+            dcol = int(np.median(arr_translations[np.nonzero(arr_translations[:,2]),2]))
+            rc = int(np.median(arr_translations[np.nonzero(arr_translations[:,3]),3]))
+            translations_list.append([drow, rr, dcol, rc])
+            print(translations_list)
+        except:
+            print('No valid translation vectors found')
+            continue
     del grid_list
     return translations_list
 
-def image_reconstruction(imgs, positions, translations_list):
+def image_reconstruction(imgs, positions:tuple, translations_list):
     '''
-    This function reconstructs the mosaic image using translation vectors for the tiles. To determine the translation vectors, translationComputation function is used. The reconstructed image is formed by overlapping the stitched tiles
-    and averaging the overlapping parts, resulting in a stitched image.
+    This function reconstructs the mosaic image using translation vectors for the tiles. To determine the translation vectors, translationComputation 
+    function is used. The reconstructed image is formed by overlapping the stitched tiles and averaging the overlapping parts, resulting in a stitched image.
 
     Args:
         imgs: list of arrays of the images to stitch
@@ -251,13 +309,18 @@ def image_reconstruction(imgs, positions, translations_list):
         res_img_list: list of resulting images
     '''
     grid_list, nrow, ncol = make_grid(imgs, positions)
-
     res_img_list = []
-    for trans_set, grid in zip(translations_list, grid_list):
+    T,M,D,H,W = imgs[0].shape
+    del imgs
+    for grid in grid_list:
         abs_translations = {}
         minr=0
         minc=0
-        drow, rr, dcol, rc = trans_set
+        translations = np.int16(translations_list)
+        drow = translations[0]
+        rr = translations[1]
+        dcol = translations[2]
+        rc = translations[3]
         for row in np.arange(nrow):
             for col in np.arange(ncol):
                 abs_translations[f'{row}{col}'] = [int(row*(drow+rr)+col*rr), int(row*rc+col*(dcol+rc))]
@@ -267,16 +330,15 @@ def image_reconstruction(imgs, positions, translations_list):
                     minr=minr_
                 if minc_<minc:
                     minc=minc_
-        H,W = imgs[0].shape[-2], imgs[0].shape[-1]
         Hmax,Wmax = abs_translations[f'{nrow-1}{ncol-1}']
         rerr = abs(minr)
         cerr = abs(minc)
         nH,nW = Hmax+H+2*rerr, Wmax+W+2*cerr
         ntiles = len(abs_translations)
-        res_img = np.empty((imgs[0].shape[0], imgs[0].shape[-3], nH, nW), dtype=np.uint8)
+        res_img = np.empty((T, D, nH, nW), dtype=np.uint16)
         t=0
         for grid_t in tqdm(grid, 'Reconstructing timeframes'):
-            for z in np.arange(imgs[0].shape[-3]):
+            for z in np.arange(D):
                 tiles = np.empty((ntiles, nH, nW))
                 for trans, i in zip(abs_translations, range(0, ntiles)):
                     result = np.zeros((nH, nW))
@@ -293,4 +355,6 @@ def image_reconstruction(imgs, positions, translations_list):
             t+=1
         res_img_list.append(res_img)
         del res_img
+        del tiles
+    del grid_list
     return res_img_list
