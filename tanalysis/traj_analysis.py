@@ -270,7 +270,7 @@ def ezmsd(xyz:pd.DataFrame) -> np.ndarray:
     '''
     track_msd = []
     dims = len(xyz.shape)
-    for tlag in range(1, len(xyz)):
+    for tlag in range(1, len(xyz)-1):
         if dims > 1:
             msd_sum = np.sum((np.asarray(xyz[tlag:]).astype(np.double) - np.asarray(xyz[:-tlag]).astype(np.double))**2, axis=-1)
             msd = np.nanmean(msd_sum)
@@ -298,7 +298,8 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
     ''' 
     ids = np.unique(tracks.index.get_level_values(0))
     frames = tracks.loc[ids[0]].index
-    final_msds = pd.DataFrame(data=np.arange(1,len(frames)), index=np.arange(1,len(frames)), columns=['frame']) 
+    final_msds = pd.DataFrame(data=np.arange(1,len(frames)-1), index=np.arange(1,len(frames)-1), columns=['frame']) 
+    alpha_coef = pd.DataFrame(data=['alpha'], index=[ids[0]], columns=['alpha_coef'])
     diff_coef = pd.DataFrame(data=['D'], index=[ids[0]], columns=['diff_coef'])
     # Calculate msd for each track in the file
     for id in ids:
@@ -307,12 +308,14 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         xyz = track.iloc[:,slice(1,None,1)]
         msd0 = ezmsd(xyz)
         final_msds[f'msd_{id}'] = msd0.astype(np.double)
-        regr = linregress(np.log10(np.array(frames[1:])), np.log10(msd0))
-        D = abs(regr.slope/(2*len(xyz.columns)))
+        regr = linregress(np.log10(np.array(frames[1:-1])*dt), np.log10(msd0))
+        alpha = regr.slope
+        D = regr.intercept/(2*len(track.iloc[0, slice(1, None, 1)]))
+        alpha_coef[f'alpha_{id}'] = alpha
         diff_coef[f'D_{id}'] = D
     mean_msd = np.mean(final_msds, axis=1)
     std_msd = np.std(final_msds, axis=1)/np.sqrt(len(final_msds)) #standard error of the mean (std/sqrt(n))
-    mean_msds = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames))*dt, 'msd': mean_msd, 'std_dev': std_msd})
+    mean_msds = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-1)*dt, 'msd': mean_msd, 'std_dev': std_msd})
     #save the file
     if save_results:
         if not os.path.isdir(savedir):
@@ -321,8 +324,9 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
             mean_msds.to_excel(writer, sheet_name='mean_msd', index=False)
             final_msds.to_excel(writer, sheet_name='track_msd', index=False)
+            alpha_coef.to_excel(writer, sheet_name='alpha_coef', index=False)
             diff_coef.to_excel(writer, sheet_name='diff_coef', index=False)
-    return final_msds, mean_msds, diff_coef
+    return final_msds, mean_msds, alpha_coef, diff_coef
 
 def directionality_tortuosity(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
@@ -350,8 +354,8 @@ def directionality_tortuosity(tracks:pd.DataFrame, names:str, timelapse_units:st
             d_total = 0.00001
         if d_euclidean==0:
             d_euclidean = 0.00001
-        dir_tort.append([id, d_euclidean/d_total, d_total/d_euclidean])
-    df_dir_tort = pd.DataFrame(np.asarray(dir_tort), columns=['id', 'directionality', 'tortuosity'])
+        dir_tort.append([id, d_euclidean/d_total, d_total/d_euclidean, d_total, d_euclidean])
+    df_dir_tort = pd.DataFrame(np.asarray(dir_tort), columns=['id', 'directionality', 'tortuosity', 'total distance', 'net distance'])
 
     # save results in excel file
     if save_results:
@@ -463,7 +467,7 @@ def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
     '''
     ids = np.unique(tracks.index.get_level_values(0))
     frames = tracks.loc[ids[0]].index
-    final_acfs = pd.DataFrame(data=np.arange(1,len(frames)-1), index=np.arange(1,len(frames)-1), columns=['frame']) 
+    final_acfs = pd.DataFrame(data=np.arange(1,len(frames)-2), index=np.arange(1,len(frames)-2), columns=['frame']) 
     # Calculate acf for each track in the file
     for id in ids:
         track = tracks.loc[id]
@@ -471,14 +475,14 @@ def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         xyz = track.iloc[:,slice(1,None,1)]
         dxyz = np.diff(xyz, axis=0)
         track_acf = []
-        for tlag in range(1, len(xyz)-1):
+        for tlag in range(1, len(xyz)-2):
             acf = np.nanmean(np.sum(dxyz[tlag:]*dxyz[:-tlag], axis=1))
             track_acf.append(acf)
         acf0 = np.asarray(track_acf)
         final_acfs[f'acfs_{id}'] = acf0.astype(np.double)
     mean_acf = np.mean(final_acfs, axis=1)
     std_acf = np.std(final_acfs, axis=1)/np.sqrt(len(final_acfs))
-    mean_acfs = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-1)*dt, 'acf': mean_acf, 'std_dev': std_acf})
+    mean_acfs = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-2)*dt, 'acf': mean_acf, 'std_dev': std_acf})
     #save the file
     if save_results:
         if not os.path.isdir(savedir):
@@ -632,9 +636,7 @@ def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, r
         sim_tracks.to_excel(writer, sheet_name='sim_APRW', index=False)
     return sim_tracks
 
-###########################################
-
-def PDF_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, binn:int, savedir:str="", save_results:bool=True):
+def PDF(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedir:str="", save_results:bool=True):
     '''
     This function calculates the probability density function (PDF) of the displacement. 
     For a given time lag, it calculates all displacements and distributes them along the given number of bins, up to the maximum displacement assigned.
@@ -651,66 +653,26 @@ def PDF_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, binn:i
         df_PDF: dataframe containing the information of the bins and the histogram created
     '''
     ids = np.unique(tracks.index.get_level_values(0))
-    file_d_euc = []
+    file_d_euc = [] # one row per track
+    file_angle = [] # several rows per track
     for id in ids:
         track = tracks.loc[id][['x','y','z']]
-        d_euc = np.linalg.norm(np.asarray(track.loc[tlag:])-np.asarray(track.loc[:len(track)-tlag-1]), axis=1)
-        file_d_euc.append(np.mean(d_euc))
-    bin_distr = np.linspace() ##################################################
-    hist, bins = np.histogram(file_d_euc, bins=bin_distr)
-    df_PDF = pd.DataFrame({'bins': bins[:,-1], 'hist':hist})
+        d_euc = np.linalg.norm(np.asarray(track.loc[tlag:])-np.asarray(track.loc[:len(track)-tlag-1]), axis=1) #Euclidean distance 
+        dxyz = np.diff(track.loc[:len(track)-tlag], axis=0)
+        dxyztau = np.asarray(track.loc[tlag:])-np.asarray(track.loc[:len(track)-tlag-1])
+        norm = np.linalg.norm(dxyz, axis=1)*np.linalg.norm(dxyztau, axis=1)
+        norm[norm==0] = np.nan
+        theta = np.arccos(np.divide(np.vecdot(dxyz,dxyztau),(norm)))/np.pi*180
+        file_d_euc.append(np.nanmean(d_euc))
+        file_angle.append(np.nanmean(theta))
+    df_PDF = pd.DataFrame({'id': ids, 'net_dist':file_d_euc, 'mean_angle':file_angle})
     if save_results:
         if not os.path.exists(savedir):
             os.makedirs(os.path.abspath(savedir))
-        savename = f'{os.path.join(savedir, names)}_PDF_dR.xlsx'
+        savename = f'{os.path.join(savedir, names)}_PDF.xlsx'
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-            df_PDF.to_excel(writer, sheet_name='PDF_dR', index=False)
+            df_PDF.to_excel(writer, sheet_name='PDF', index=False)
     return df_PDF
-
-def PDF_dtheta(tracks:list[np.ndarray], names:list[str], timelapse_units:str, tlag:int, binn:int, savedir:str="", save_results:bool=True):
-    '''
-    This function calculates the probability density funtion (PDF) of the angle. 
-    Given a time lag, the function calculates the angle turned (between 0 and 180º) between the current position and the position one time lag after.
-
-    Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
-        timelapse_units (str): time units of the tracks (s, min, h)
-        tlag (int): value of the timelag that will be used in the PDF calculation
-        savedir (str): path where resulting excels will be saved. Defaults to None
-        save_results (bool): save excel with the results of the function. Defaults to True
-    '''
-    if not os.path.exists(savedir):
-        os.makedirs(os.path.abspath(savedir))
-
-    all_files_PDF_dtheta = []
-    all_files = []
-    bin_distr = np.linspace(0, 180, binn)
-    dt = 2
-    for file in all_files:
-        angle = []
-        #calculate PDF_dtheta for each track in the file
-        for track in file:
-            t = track[:,1]
-            xyz = track[:,2:]
-            for j in range(0, len(t)-np.uint16(tlag/dt)-1):
-                dxyzt = xyz[j+1]-xyz[j]
-                dxyztau = xyz[j+np.uint16(tlag/dt)+1]-xyz[j+np.uint16(tlag/dt)]
-                theta = np.arccos(np.dot(dxyzt, dxyztau)/(np.sqrt(np.sum(dxyzt**2))*np.sqrt(np.sum(dxyztau**2))))
-                angle.append(theta/np.pi*180)
-        hist, bins = np.histogram(np.array(angle), bin_distr, density=True)
-        all_files_PDF_dtheta.append([hist, bins[0:-1]])
-    
-    #save PDF_dtheta into excel files, if multiple files have been readed, multiple excel files will be created
-    name = 0
-    if save_results==True:
-        for file in all_files_PDF_dtheta:
-            savename = f'{os.path.join(savedir,names)}_PDF_dtheta_{tlag}{timelapse_units}.xlsx'
-            df = pd.DataFrame({'bins': file[1], 'PDF_dtheta': file[0]})
-            df.to_excel(savename, sheet_name='PDF_dtheta', index=False)
-            name = name+1
-
-    return
 
 ################################################
 
@@ -727,9 +689,6 @@ def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
         savedir = os.path.abspath(fr'{dirname}\Results')
         if not os.path.exists(savedir):
             os.makedirs(savedir)
-    
-    all_files_PDF_dtheta = []
-    bin_distr = np.linspace(0, 360, binn)
 
     plt.figure()
     for file in all_files:
