@@ -19,6 +19,7 @@ dependencies = [
     "ipywidgets (>=8.1.8,<9.0.0)",
     "napari (>=0.7.0,<0.8.0)",
     "ipykernel (==6.31.0)",
+    "napari-bioformats (>=0.3.0.post0,<0.4.0)",
 ]
 
 
