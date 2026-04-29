@@ -676,38 +676,28 @@ def PDF(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedir:s
 
 ################################################
 
-def polarity_dR(dirname, dt, tlag, binn=20, savedir=None):
+def polarity_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
     This function is used to determine the polarity of the velocity. It detrmines the primary axis and rotates the 
     '''
-    all_files, name_list = get_traj(dirname)
+    polarity = []
+    ids = np.unique(tracks.index.get_level_values(0))
+    # calculate directionality and tortuosity for each track
+    for id in ids:
+        xyz = tracks.loc[id].iloc[:,slice(1,None,1)]
+        net_xyz = np.asarray(xyz.iloc[-1]-xyz.iloc[0])
+        xy_angle = np.degrees(np.arctan(net_xyz[1]/net_xyz[0]))
+        zx_angle = np.degrees(np.arctan(net_xyz[2]/net_xyz[0]))
+        polarity.append([id, xy_angle, zx_angle])
+    df_dir_tort = pd.DataFrame(np.asarray(polarity), columns=['id', 'xy_polarity', 'zx_polarity'])
 
-    if os.path.isfile(dirname):
-        raise ValueError('Error: please indicate the path to the folder where results will be saved.')
-
-    if savedir==None:
-        savedir = os.path.abspath(fr'{dirname}\Results')
-        if not os.path.exists(savedir):
-            os.makedirs(savedir)
-
-    plt.figure()
-    for file in all_files:
-        angle = []
-        #calculate polarity_dR for each track in the file
-        for track in file:
-            t = track[:,1]
-            xyz = track[:,2:]
-            dxyz = np.diff(xyz, axis=0)
-            U, S, V = np.linalg.svd(dxyz, full_matrices=False) #the numpy function returns Vt, but we want the orthogonal vectors in the columns
-            dxyzr = np.dot(dxyz, np.transpose(V))
-
-            theta = np.arctan(dxyzr[:,1]/dxyzr[:,0])
-            angle = theta*180/np.pi
-            for i in range(0,len(angle)):
-                if angle[i]<0:
-                    angle[i]=angle[i]+360
-            
-            dr = np.sqrt(dxyzr[0]**2+dxyzr[1]**2)
+    # save results in excel file
+    if save_results:
+        if not os.path.isdir(savedir):
+            raise ValueError ("Save directory is not valid")
+        savename = f'{os.path.join(savedir, names)}_polarity.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df_dir_tort.to_excel(writer, sheet_name='polarity', index=False)
     return
 
 def fit_PRW(dirname, dt, dim):
