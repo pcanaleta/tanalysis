@@ -18,6 +18,10 @@ dependencies = [
     "scikit-image (>=0.26.0,<0.27.0)",
     "ipywidgets (>=8.1.8,<9.0.0)",
     "openpyxl (>=3.1.5,<4.0.0)",
+    "ipykernel (<7.0.0)",
+    "napari (>=0.7.0,<0.8.0)",
+    "napari-bioformats (>=0.3.0.post0,<0.4.0)",
+    "ultrack (>=0.7.2,<0.8.0)",
 ]
 
 
@@ -25,7 +29,3 @@ dependencies = [
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-[dependency-groups]
-dev = [
-    "ipykernel (>=7.2.0,<8.0.0)"
-]
