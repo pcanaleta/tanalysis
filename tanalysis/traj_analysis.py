@@ -674,11 +674,19 @@ def PDF(tracks:pd.DataFrame, names:str, timelapse_units:str, tlag:int, savedir:s
             df_PDF.to_excel(writer, sheet_name='PDF', index=False)
     return df_PDF
 
-################################################
-
 def polarity_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="", save_results:bool=True):
     '''
-    This function is used to determine the polarity of the velocity. It detrmines the primary axis and rotates the 
+    This function calculates the angle of migration of the cells in XY plane and ZX plane. The net distance of the track is used to calculate the angle of migration.
+
+    Args:
+        tracks (pd.DataFrame): dataframe of tracks. Tracks must be in order [id,t,x,y,(z)]
+        names (str): name of the track condition
+        timelapse_units (str): time units of the tracks (s, min, h)
+        savedir (str): path where resulting excels will be saved. Defaults to None
+        save_results (bool): save excel with the results of the function. Defaults to True
+
+    Returns:
+        df_polarity: dataframe containing the calculated angles of migration
     '''
     polarity = []
     ids = np.unique(tracks.index.get_level_values(0))
@@ -698,7 +706,7 @@ def polarity_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str
         savename = f'{os.path.join(savedir, names)}_polarity.xlsx'
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
             df_polarity.to_excel(writer, sheet_name='polarity', index=False)
-    return
+    return df_polarity
 
 def fit_PRW(dirname, dt, dim):
     '''
