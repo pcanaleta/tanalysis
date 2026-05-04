@@ -686,10 +686,10 @@ def polarity_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str
     for id in ids:
         xyz = tracks.loc[id].iloc[:,slice(1,None,1)]
         net_xyz = np.asarray(xyz.iloc[-1]-xyz.iloc[0])
-        xy_angle = np.degrees(np.arctan(net_xyz[1]/net_xyz[0]))
-        zx_angle = np.degrees(np.arctan(net_xyz[2]/net_xyz[0]))
+        xy_angle = np.degrees(np.arctan2(net_xyz[1],net_xyz[0]))
+        zx_angle = np.degrees(np.arctan2(net_xyz[2],net_xyz[0]))
         polarity.append([id, xy_angle, zx_angle])
-    df_dir_tort = pd.DataFrame(np.asarray(polarity), columns=['id', 'xy_polarity', 'zx_polarity'])
+    df_polarity = pd.DataFrame(np.asarray(polarity), columns=['id', 'xy_polarity', 'zx_polarity'])
 
     # save results in excel file
     if save_results:
@@ -697,7 +697,7 @@ def polarity_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str
             raise ValueError ("Save directory is not valid")
         savename = f'{os.path.join(savedir, names)}_polarity.xlsx'
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
-            df_dir_tort.to_excel(writer, sheet_name='polarity', index=False)
+            df_polarity.to_excel(writer, sheet_name='polarity', index=False)
     return
 
 def fit_PRW(dirname, dt, dim):
