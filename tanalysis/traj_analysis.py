@@ -708,45 +708,45 @@ def polarity_dR(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str
             df_polarity.to_excel(writer, sheet_name='polarity', index=False)
     return df_polarity
 
-def fit_PRW(dirname, dt, dim):
+def fit_PRW(tracks:pd.DataFrame, names:str, savedir:str):
     '''
-    This function calculates the msd for every track and fits a persisten random walk model in each one, obtaining the parameters P, S, and SE for every track.
+    This functions rotates the trajectories to the primary axis of migration (p) and calculates the msd for the 
+    primary and non primary axes.
 
     Args:
-        filename (string): path to the msd file.
-        dt (int): trajectory time step size
-        dim (int): dimensionality of the tracks (2 for 2D or 3 for 3D)
+        tracks (pd.DataFrame): dataframe containing the trajectories of the file
+        names (str): name of the condition of the tracks in the file
+        savedir (str): folder path where the parameters will be saved
     '''
-    track_list, name_list = get_traj(dirname)
-
-    savedir = os.path.abspath(fr'{dirname}\PRW')
     if not os.path.exists(savedir):
         os.makedirs(savedir)
     
-    name = 0
-    psse = []
-    for file in track_list:
-        file_psse = []
-        for track in file:
-            used_len = np.uint16(np.round(len(track)/2)) #use only the first 1/3 of tracks as they contain les error
-            msd = ezmsd(track[:used_len+1,:])
-            t = np.linspace(1, used_len, used_len)
+    params_list = []
+    ids = np.unique(tracks.index.get_level_values(0))
+    for id in ids:
+        track = tracks.loc[id]
+        xyz = track.iloc[:,slice(1,None,1)].dropna()
 
-            #fit the values in PRW_msd equation
-            if dim == 2:
-                popt, pcov = curve_fit(tPRW2D, t*dt, msd, p0=(10, 0.01, 1), bounds=(0, [1000, 20, 100]), method='trf', maxfev=1000)
-            elif dim == 3:
-                popt, pcov = curve_fit(tPRW3D, t*dt, msd, p0=(10, 0.01, 1), bounds=(0, [1000, 20, 100]), method='trf', maxfev=1000)
-            file_psse.append(np.array(popt))
-        params = np.array(file_psse)
+        dt = np.unique(np.diff(track, axis=0)[:,0][0])[0]
+        frames = xyz.index
+        tlag = frames[1:]
         
-        psse.append(params)
-        savename = f'{os.path.join(savedir, name_list[name])}_PRW_params.xlsx'
-        savedf = pd.DataFrame({'P':params[:,0], 'S':params[:,1], 'SE':params[:,2]})
-        savedf.to_excel(savename, sheet_name='params', index=False)
-        name = name+1
-        
-    return params
+        msd = ezmsd(xyz)
+        popt, _ = curve_fit(tPRW3D, tlag*dt, msd, p0=(100,0.1,1), bounds=([0, 0, 0], [1000,100/dt,10]), 
+                             method='trf', maxfev=10000)
+        rmse = np.sqrt(np.mean((msd - tPRW2D(tlag*dt, *popt))**2))
+
+        params_list.append([*popt, rmse])
+    index = pd.MultiIndex.from_product([ids,['p']])
+    df_params = pd.DataFrame(np.array(params_list), index=index, columns=['P','S','SE','rmse'])
+    if os.path.isdir(savedir):
+        savename = f'{os.path.join(savedir,names)}_PRW_params.xlsx'
+        with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+            df_params.to_excel(writer, sheet_name='PRW_params', index=True)
+    
+    return df_params
+
+##########################################
 
 def sim_PRW(dirname, tlag, dim, Nmax=50, repeats=20, subsamples=100):
     '''
