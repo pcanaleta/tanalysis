@@ -631,7 +631,6 @@ def sim_APRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, r
         count += 1
     savename = fr'{savedir}\Simulations\{names}_sim_APRW.xlsx'
     sim_tracks = pd.DataFrame(np.vstack(xys00), columns=['id', 'time', 'x', 'y', 'z'])
-    #{'id':np.vstack(xys00)[:,0], 'time':np.vstack(xys00)[:,1], 'x':np.vstack(xys00)[:,2], 'y':np.vstack(xys00)[:,3], 'z':np.vstack(xys00)[:,4]}
     with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
         sim_tracks.to_excel(writer, sheet_name='sim_APRW', index=False)
     return sim_tracks
@@ -746,103 +745,78 @@ def fit_PRW(tracks:pd.DataFrame, names:str, savedir:str):
     
     return df_params
 
-##########################################
-
-def sim_PRW(dirname, tlag, dim, Nmax=50, repeats=20, subsamples=100):
+def sim_PRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, repeats:int=30, subsamples:int=100, savedir:str=None):
     '''
     This function simulates different tracks with the parameters determined in the fitting. The function saves an .xlsx file with all simulated tracks
 
     Args:
-        dirname (string): path to the directory containing the files with the parameters
-        tlag (int): time step of the tracks (needs to be the same one used in the fitting)
-        dim (int): dimensionality of the tracks (2 for 2D and 3 for 3D)
+        params (pd.DataFrame): dataframe with the parameters calculated in fit_PRW function
+        tracks (pd.DataFrame): dataframe containing the trajectories of the file
+        names (str): name of the condition of the tracks
         Nmax (int): maximum number of time lags that will be calculated when simulating the tracks
         repeats (int): number of simulated tracks per set of parameters
+        subsamples (int): number of divisions between time lags. Used for calculation of the simulated tracks
+        savedir (str): path to the folder where simulated tracks will be saved
     '''
-    subsample = subsamples
-    dt = tlag/subsample 
-    savedir = fr'{dirname}\Simulations'
-    if not os.path.exists(savedir):
-        os.makedirs(savedir)
+    ids = np.unique(params.index.get_level_values(0))
 
-    params = []
-    savenames = []
-    for fname in os.listdir(dirname):
-        ext = os.path.splitext(fname)[-1].lower()
-        if ext=='.xlsx' or ext=='.xls':
-            df = pd.read_excel(os.path.abspath(os.path.join(dirname,fname))).to_numpy()
-            params.append(df)
-            newname = fname.replace('_params.xlsx', '_sim_tracks.xlsx')
-            savename = os.path.join(savedir, newname)
-            savenames.append(savename)
-
-
+    #Extract tlag and dimensions from original tracks
+    track = tracks.loc[ids[0]]
+    dim = len(track.columns)-1
+    tlag = np.unique(np.diff(track['time']))[0]
+    dt = tlag/subsamples
     ss = 10 ** np.ceil(np.log10(repeats))
-    n = 0
-    
-    for file in params:
-        xys00 = []
-        simxy = []
-        count = 1
-        for track in file:
-            P,S,SE = track
-            beta = 1/P
-            alpha = S**2*beta
-            ap = max(0, 1-beta*dt)
-            FR = np.sqrt(alpha*dt)*dt
-    
-            fnum = Nmax*subsample
-            for rep in range(0, repeats):
-                dr = np.zeros((fnum, dim))
-                xyz = np.zeros((fnum, dim))
+    #Simulation of given number of repeats for each track
+    xys00 = []
+    count = 0
+    for id in ids:
+        track_params = params.loc[id]
+        beta = 1/track_params['P']
+        alpha = (track_params['S']**2)*beta
+        FR = np.sqrt(alpha*dt)*dt
+        ap = max(0, 1-dt/track_params['P'])
+        SE = track_params['SE']
+        fnum = Nmax*subsamples
 
-                for i in range(0, fnum-1):
-                    for d in range(0, dim):
-                        dr[i+1,d] = FR*np.random.randn() + ap*dr[i,d]
+        for rep in range(0, repeats):
+            dr = np.zeros((fnum, dim))
+            xyz = np.zeros((fnum, dim))
 
-                for k in range(0, fnum-1):
-                    for kd in range(0, dim):
-                        xyz[k+1, kd] = xyz[k,kd] + dr[k,kd]
+            for i in range(0, fnum-1):
+                dr[i+1,:] = FR*np.random.randn() + ap*dr[i,:]
+                xyz[i+1,:] = xyz[i,:] + dr[i,:]
+            exyz = xyz[::subsamples, :]
+            oxyz = exyz - np.ones((exyz.shape[0], 1))*exyz[0,:]
+            oxyz = oxyz + np.random.randn(len(oxyz[:]),dim)*SE #Position noise
 
-                exyz = xyz[::subsample, :]
-                oxyz = exyz - np.ones((exyz.shape[0], 1)) * exyz[0, :] #
-           
-                #including position noise
-                for k in range(0, Nmax):
-                    for kd in range(0, dim):
-                        oxyz[k,kd] = oxyz[k,kd] + np.random.randn()*SE
-
-                #rotate the trajectories randomly
-                if dim==3:
-                    thetax = np.random.rand()*2*np.pi
-                    Rx = np.array([[1, 0, 0],
-                                   [np.cos(thetax), -np.sin(thetax), 0],
-                                   [0, np.sin(thetax), np.cos(thetax)]])
+            if dim==3:
+                theta = np.random.randn()*2*np.pi
+                Rx = np.array([[1, 0, 0],
+                               [np.cos(theta[0]), -np.sin(theta[0]), 0],
+                               [0, np.sin(theta[0]), np.cos(theta[0])]])
       
-                    thetay = np.random.rand()*2*np.pi
-                    Ry = np.array([[np.cos(thetay), 0, np.sin(thetay)],
-                                   [0, 1, 0],
-                                   [-np.sin(thetay), 0, np.cos(thetay)]])
-       
-                    thetaz = np.random.rand()*2*np.pi
-                    Rz = np.array([[np.cos(thetaz), -np.sin(thetaz), 0],
-                                   [np.sin(thetaz), np.cos(thetaz), 0],
-                                   [0, 0, 1]])
+                Ry = np.array([[np.cos(theta[1]), 0, np.sin(theta[1])],
+                               [0, 1, 0],
+                               [-np.sin(theta[1]), 0, np.cos(theta[1])]])
 
-                    Rm = np.dot(Rx, np.dot(Ry, Rz))
-                    rxyz = np.dot(oxyz, Rm) #rotate matrix
-
-                elif dim==2:
-                    theta=np.random.rand()*2*np.pi
-                    Rm = np.array([[np.cos(theta), -np.sin(theta)],
-                                    [np.sin(theta), np.cos(theta)]])
-                    rxyz=np.dot(oxyz,Rm)
-
-                xyss0 = np.column_stack((np.ones(rxyz.shape[0]) * count * ss + rep, np.arange(0, len(rxyz))*tlag, rxyz))
-                xys00.append(xyss0)  # for output to excel
-                simxy.append(xyss0)  # for output variable
-            count = count+1
-
-        pd.DataFrame(np.vstack(xys00)).to_excel(savenames[n], sheet_name='sim_PRW', index=False)
-        n = n+1           
-    return
+                Rz = np.array([[np.cos(theta[2]), -np.sin(theta[2]), 0],
+                               [np.sin(theta[2]), np.cos(theta[2]), 0],
+                               [0, 0, 1]])
+            
+                Rm = Rx@Ry@Rz
+                rxyz = oxyz@Rm
+        
+            elif dim==2:
+                theta = np.random.randn()*2*np.pi
+                Rm = np.array([[np.cos(theta), -np.sin(theta)],
+                               [np.sin(theta), np.cos(theta)]])
+                rxyz = oxyz@Rm
+        
+            xyss0 = np.column_stack((np.ones(rxyz.shape[0])*count*ss + rep, np.arange(0, len(rxyz))*tlag, rxyz))
+            xys00.append(xyss0)
+        count += 1
+    savename = fr'{savedir}\Simulations\{names}_sim_PRW.xlsx'
+    sim_tracks = pd.DataFrame(np.vstack(xys00), columns=['id', 'time', 'x', 'y', 'z'])
+    with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
+        sim_tracks.to_excel(writer, sheet_name='sim_PRW', index=False)
+    return sim_tracks
