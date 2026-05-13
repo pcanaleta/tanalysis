@@ -234,33 +234,24 @@ def label_cells(image:np.ndarray, sigmas:list, th:float):
         sigmas (list[float]): list of float sigma values
         th (float): threshold value used in the process. It depends on the intensity of the image
     '''
-    img = cp.array(np.double(image))
+    T,Z,Y,X = image.shape
+    result = np.empty(shape=(T,Z,Y,X), dtype=np.int16)
+    i=0
 
-    gaussian = fit_gaussian(*sigmas)
-    img = ndimage.convolve(img, gaussian)
-    th1 = cp.max(img)*th
-    img_th1 = img>th1
+    for frame in image:
+        max_value = np.max(frame)
+        lab_img = image>max_value*th
+        lab_img = morphology.remove_small_holes(lab_img)
+        lab_img = morphology.remove_small_objects(lab_img)
+        lab_img = morphology.dilation(lab_img)
+        lab_img = morphology.erosion(lab_img)
 
-    img = LoG_convolve(img, *sigmas)
-    th2 = cp.max(img)*th
-    img_th2 = img>th2
+        log_lab_img = np.double(lab_img)
+        log_lab_img = cp.array(log_lab_img)
+        log_lab_img = LoG_convolve(log_lab_img, *sigmas, n=7)
+        log_lab_img = cp.asnumpy(log_lab_img)
+        lab_img = np.uint16(lab_img) & np.uint16(log_lab_img>np.mean(log_lab_img))
+        result[i] = measure.label(lab_img)
+        i+=1
 
-    img_th1 = cp.asnumpy(img_th1)
-    img_th2 = cp.asnumpy(img_th2)
-
-    img = img_th1 ^ img_th2
-    img = morphology.dilation(img)
-    img = morphology.erosion(img)
-    img = morphology.remove_small_holes(img)
-    img_r1 = morphology.remove_small_objects(img)
-
-    img = cp.asarray(np.double(img_r1))
-    img = LoG_convolve(img, *sigmas)
-    img = cp.asnumpy(img)
-    th3 = np.max(img)*th
-    img_th3 = img>th3
-    img_r2 = img_r1 ^ img_th3
-    img = morphology.erosion(img_r2)
-    img = morphology.remove_small_objects(img)
-    img = measure.label(img)
-    return img
+    return result
