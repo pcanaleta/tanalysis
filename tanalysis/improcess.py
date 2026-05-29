@@ -131,7 +131,7 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
             os.makedirs(temp_savedir)
             print(temp_savedir)
         for time_frame in image:
-            masks, flows, styles = model.eval(time_frame, do_3D=do_3D, z_axis=0, normalize={'percentile':[1,100]})
+            masks, flows, _ = model.eval(time_frame, do_3D=do_3D, z_axis=0, normalize={'percentile':[1,100]})
             io.save_masks(time_frame, masks, flows, f'{name}_T{timer}.tif', tif=do_3D, png=not(do_3D), savedir=temp_savedir)
             timer=timer+1 
     return temp_savedir
