@@ -84,11 +84,11 @@ def extractOverlapSubregion(image:np.ndarray, row:int, col:int):
     Returns:
         ndArray: array containing the overlapping region of the given image
     """
-    H,W = image.shape
-    colstart = int(max(0, min(col, W, key=int), key=int))
-    colend = int(max(0, min(col+W, W, key=int), key=int))
-    rowstart = int(max(0, min(row, H, key=int), key=int))
-    rowend = int(max(0, min(row+H, H, key=int), key=int))
+    H, W = image.shape
+    colstart = max(0, min(W, col))
+    colend = max(0, min(W, col + W))
+    rowstart = max(0, min(H, row))
+    rowend = max(0, min(H, row + H))
     return image[rowstart:rowend, colstart:colend]
 
 def interpretTranslation(image1:np.ndarray, image2:np.ndarray, rowin:int, colin:int, n:int=8):
@@ -237,13 +237,15 @@ def translationComputation(imgs:list, positions:tuple, n:int=8, n_frames:int=20)
     max_img_frames = len(imgs[0])
     max_z = len(imgs[0][0])
     del imgs
+    frame_step = max(1, int(max_img_frames / min(max(1, n_frames), max_img_frames)))
+    z_step = max(1, int(max_z / 5))
     for img in grid_list:
         translations = []
-        if n_frames>max_img_frames:
+        if n_frames > max_img_frames:
             print(f'The number of frames selected is bigger than the frames in the image. Using {max_img_frames} frames instead')
-        for t in tqdm(range(0, max_img_frames, int(max_img_frames/n_frames)), 'Calculating translation vectors'):
+        for t in tqdm(range(0, max_img_frames, frame_step), 'Calculating translation vectors'):
             grid_ = img[t]
-            for z in range(0, max_z, int(max_z/5)):
+            for z in range(0, max_z, z_step):
                 Tvcol=[]
                 Throw=[]
                 Tvrow=[]
@@ -312,15 +314,14 @@ def image_reconstruction(imgs, positions:tuple, translations_list):
     res_img_list = []
     T,M,D,H,W = imgs[0].shape
     del imgs
-    for grid in grid_list:
+    if isinstance(translations_list, np.ndarray) and translations_list.ndim == 1:
+        translations_list = [translations_list]
+    for grid, translation in zip(grid_list, translations_list):
         abs_translations = {}
-        minr=0
-        minc=0
-        translations = np.int16(translations_list)
-        drow = translations[0]
-        rr = translations[1]
-        dcol = translations[2]
-        rc = translations[3]
+        minr = 0
+        minc = 0
+        translations = np.int16(translation)
+        drow, rr, dcol, rc = translations
         for row in np.arange(nrow):
             for col in np.arange(ncol):
                 abs_translations[f'{row}{col}'] = [int(row*(drow+rr)+col*rr), int(row*rc+col*(dcol+rc))]
