@@ -6860,26 +6860,26 @@ files = [
 
 [[package]]
 name = "tifffile"
-version = "2026.1.14"
+version = "2026.5.15"
 description = "Read and write TIFF files"
 optional = false
-python-versions = ">=3.11"
+python-versions = ">=3.12"
 groups = ["main"]
 files = [
-    {file = "tifffile-2026.1.14-py3-none-any.whl", hash = "sha256:29cf4adb43562a4624fc959018ab1b44e0342015d3db4581b983fe40e05f5924"},
-    {file = "tifffile-2026.1.14.tar.gz", hash = "sha256:a423c583e1eecd9ca255642d47f463efa8d7f2365a0e110eb0167570493e0c8c"},
+    {file = "tifffile-2026.5.15-py3-none-any.whl", hash = "sha256:6715515a53cabc0cefc5c9f13a0ae2c250e63e2ca784ce02d0b6c333810c2a17"},
+    {file = "tifffile-2026.5.15.tar.gz", hash = "sha256:ee4f3e07ee0d8ff4745a8c735ac2b72caa3173c7d6059b00fdc3ff492a0b635b"},
 ]
 
 [package.dependencies]
-numpy = "*"
+numpy = ">=2.1"
 
 [package.extras]
-all = ["defusedxml", "fsspec", "imagecodecs (>=2025.11.11)", "kerchunk", "lxml", "matplotlib", "zarr (>=3.1.3)"]
-codecs = ["imagecodecs (>=2025.11.11)"]
+all = ["fsspec", "imagecodecs (>=2026.5.10)", "kerchunk", "lxml", "matplotlib", "xarray", "zarr (>=3.2.0)"]
+codecs = ["imagecodecs (>=2026.5.10)"]
 plot = ["matplotlib"]
-test = ["cmapfile", "czifile", "dask", "defusedxml", "fsspec", "imagecodecs", "kerchunk", "lfdfiles", "lxml", "ndtiff", "oiffile", "psdtags", "pytest", "requests", "roifile", "xarray", "zarr (>=3.1.3)"]
-xml = ["defusedxml", "lxml"]
-zarr = ["fsspec", "kerchunk", "zarr (>=3.1.3)"]
+test = ["cmapfile", "czifile", "dask", "fsspec", "imagecodecs", "kerchunk", "lfdfiles", "lxml", "ndtiff", "oiffile", "psdtags", "pytest", "requests", "roifile", "xarray", "zarr (>=3.2.0)"]
+xml = ["lxml"]
+zarr = ["fsspec", "kerchunk", "zarr (>=3.2.0)"]
 
 [[package]]
 name = "toml"
@@ -7836,4 +7836,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "==3.12"
-content-hash = "c3838c07e9c669b27b415095e7dc2f654f5592a90801c35bc52685a78bfba64a"
+content-hash = "f64d8d55fe581dbcfb6a708dea4a80ca185816451096efeb60966ca024e1fb97"
