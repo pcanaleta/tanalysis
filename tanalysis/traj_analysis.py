@@ -16,7 +16,7 @@ def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     This function converts all xml files contained in a folder into a merged excel file with all data. One file is created for each condition
     directory tree should be something like:
         -Tracks
-            -xml_files  <--- path given to the function
+            -xml_tracks  <--- path given to the function
                 -Condition1:
                     -1.xml
                     -2.xml
@@ -51,7 +51,7 @@ def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     axlsxdata = np.array(xlsxdata)
 
     #create a directory where excel tracks will be saved
-    savedir = os.path.split(dirname)[0].replace('xml_tracks','excel_tracks')
+    savedir = os.path.join(os.path.split(dirname)[0], 'excel_tracks')
     if not os.path.exists(savedir):
         os.makedirs(os.path.abspath(savedir))
     
@@ -103,6 +103,7 @@ def get_traj(dirname:str):
         tracks = pd.read_excel(dirname)
     except:         
         print(f'Could not read: {dirname}')
+        return
     
     t_lens = []
     total_frames = []
@@ -132,20 +133,56 @@ def filter_traj(dirname:str, filter_values:dict):
         name: name of the track
     '''
     df, name = get_traj(dirname)
+
+    required_params = ['track_duration', 'total_distance', 'mean_velocity']
+    for k in required_params:
+        if k not in filter_values.keys():
+            raise ValueError(f'Missing filter parameter: {k}. Please provide a min and max value for this parameter in the filter_values dict.')
+        if len(filter_values[k])!=2:
+            raise ValueError(f'Filter values for {k} should be composed of a min and a max value. Please provide both values in the filter_values dict.')
+        
     valid_ids = []
-    for id in np.unique(df.index.get_level_values(0)):
-        ctrack = df.loc[id,:]
-        total_distance = np.nansum(np.abs(np.diff(np.linalg.norm(ctrack[['x','y','z']], axis=1), axis=0)))
-        mean_speed = np.nanmean(np.abs(np.diff(np.linalg.norm(ctrack[['x','y','z']], axis=1), axis=0))/(np.diff(ctrack[['time']], axis=0)))
-        track_duration = np.max(ctrack[['time']])-np.min(ctrack[['time']])
-        # Compare given filter values to the current track and store only the valid ids
-        comparison = [filter_values['track_duration'][0]<=track_duration<=filter_values['track_duration'][1], 
-                      filter_values['total_distance'][0]<=total_distance<=filter_values['total_distance'][1], 
-                      filter_values['mean_velocity'][0]<=mean_speed<=filter_values['mean_velocity'][1]]
-        if all(comparison):
-            valid_ids.append(id)
-        else:
+    for tid in np.unique(df.index.get_level_values(0)):
+        ctrack = df.loc[tid].dropna(subset=['x'], how='all')
+        # Select available position columns (2D and 3D)
+        pos_cols = [c for c in ['x', 'y', 'z'] if c in ctrack.columns]
+        if len(pos_cols) < 2:
             continue
+
+        pos = ctrack[pos_cols].values.astype(np.double)
+        times = ctrack['time'].values.astype(np.double)
+
+        # Need at least 2 frames to calculate the parameters, if not, ignore the track
+        if len(times)<2:
+            continue
+        
+        # Step distances
+        step_distances = np.linalg.norm(np.diff(pos, axis=0), axis=1)
+
+        # Step durations (1D)
+        step_times = np.diff(times)
+
+        # Avoid inf/nan
+        valid_mask = step_times > 0
+        if np.any(valid_mask):
+            inst_speeds = np.full_like(step_distances, np.nan, dtype=np.double)
+            inst_speeds[valid_mask] = step_distances[valid_mask] / step_times[valid_mask]
+            mean_speed = np.nanmean(inst_speeds)
+        else:
+            mean_speed = np.nan
+
+        total_distance = np.nansum(step_distances)
+        track_duration = np.nanmax(times) - np.nanmin(times)
+
+        # Apply filters (assumes each filter value is a tuple/list of (min, max))
+        comp_duration = filter_values['track_duration'][0] <= track_duration <= filter_values['track_duration'][1]
+        comp_distance = filter_values['total_distance'][0] <= total_distance <= filter_values['total_distance'][1]
+        comp_speed = False
+        if not np.isnan(mean_speed):
+            comp_speed = filter_values['mean_velocity'][0] <= mean_speed <= filter_values['mean_velocity'][1]
+
+        if comp_duration and comp_distance and comp_speed:
+            valid_ids.append(tid)
     filtered_tracks = df.loc[valid_ids]
     return filtered_tracks, name
 
@@ -174,7 +211,7 @@ def crop_traj(dirname:str, filter_tracks:bool=False, filter_values:dict={}):
         if t_len<min_len:
             min_len = t_len
     # Reindex the dataframe to crop all tracks to the same length and fill empty spaces
-    iterables = pd.MultiIndex.from_product([np.unique(tracks.index.get_level_values(0)), np.arange(min_len+1)])
+    iterables = pd.MultiIndex.from_product([np.unique(tracks.index.get_level_values(0)), np.arange(min_len)])
     tracks = tracks.reindex(index=iterables)
     return tracks, name
 
@@ -183,8 +220,8 @@ def velocity(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str=""
     This function is used to calculate the velocity of the cells. It performs the mean between the velocities of all tracks and generates a file containing the velocity for each time frame.
 
     Args:
-        tracks (list[np.ndarray]): list of track arrays. Track arrays must be in order [id,t,x,y,(z)]
-        names (list[str]): list of names of the track conditions
+        tracks (pd.DataFrame): dataframe containing the track data
+        names (str): name of the track conditions
         timelapse_units (str): time units of the tracks (s, min, h)
         savedir (str): path where resulting excels will be saved. Defaults to None
         save_results (bool): save excel with the results of the function. Defaults to True
@@ -313,8 +350,8 @@ def get_msd(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
         D = regr.intercept/(2*len(track.iloc[0, slice(1, None, 1)]))
         alpha_coef[f'alpha_{id}'] = alpha
         diff_coef[f'D_{id}'] = D
-    mean_msd = np.mean(final_msds, axis=1)
-    std_msd = np.std(final_msds, axis=1)/np.sqrt(len(final_msds)) #standard error of the mean (std/sqrt(n))
+    mean_msd = np.mean(final_msds.iloc[:, 1:], axis=1)
+    std_msd = np.std(final_msds.iloc[:, 1:], axis=1)/np.sqrt(len(final_msds.iloc[:, 1:])) #standard error of the mean (std/sqrt(n))
     mean_msds = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-1)*dt, 'msd': mean_msd, 'std_dev': std_msd})
     #save the file
     if save_results:
@@ -441,7 +478,7 @@ def turning_angle(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:s
 
     # save results in excel file
     if save_results:
-        if not os .path.isdir(savedir):
+        if not os.path.isdir(savedir):
             raise ValueError ("Save directory is not valid")
         savename = f'{os.path.join(savedir, names)}_turning_angle.xlsx'
         with pd.ExcelWriter(savename, mode='w', engine='openpyxl') as writer:
@@ -480,8 +517,8 @@ def get_acf(tracks:pd.DataFrame, names:str, timelapse_units:str, savedir:str="",
             track_acf.append(acf)
         acf0 = np.asarray(track_acf)
         final_acfs[f'acfs_{id}'] = acf0.astype(np.double)
-    mean_acf = np.mean(final_acfs, axis=1)
-    std_acf = np.std(final_acfs, axis=1)/np.sqrt(len(final_acfs))
+    mean_acf = np.mean(final_acfs.iloc[:, 1:], axis=1)
+    std_acf = np.std(final_acfs.iloc[:, 1:], axis=1)/np.sqrt(len(final_acfs.iloc[:, 1:]))
     mean_acfs = pd.DataFrame({f'dt ({timelapse_units})': np.arange(1, len(frames)-2)*dt, 'acf': mean_acf, 'std_dev': std_acf})
     #save the file
     if save_results:
@@ -733,7 +770,7 @@ def fit_PRW(tracks:pd.DataFrame, names:str, savedir:str):
         msd = ezmsd(xyz)
         popt, _ = curve_fit(tPRW3D, tlag*dt, msd, p0=(100,0.1,1), bounds=([0, 0, 0], [1000,100/dt,10]), 
                              method='trf', maxfev=10000)
-        rmse = np.sqrt(np.mean((msd - tPRW2D(tlag*dt, *popt))**2))
+        rmse = np.sqrt(np.mean((msd - tPRW3D(tlag*dt, *popt))**2))
 
         params_list.append([*popt, rmse])
     index = pd.MultiIndex.from_product([ids,['p']])
@@ -792,15 +829,15 @@ def sim_PRW(params:pd.DataFrame, tracks:pd.DataFrame, names:str, Nmax:int=50, re
             if dim==3:
                 theta = np.random.randn()*2*np.pi
                 Rx = np.array([[1, 0, 0],
-                               [np.cos(theta[0]), -np.sin(theta[0]), 0],
-                               [0, np.sin(theta[0]), np.cos(theta[0])]])
+                               [np.cos(theta), -np.sin(theta), 0],
+                               [0, np.sin(theta), np.cos(theta)]])
       
-                Ry = np.array([[np.cos(theta[1]), 0, np.sin(theta[1])],
+                Ry = np.array([[np.cos(theta), 0, np.sin(theta)],
                                [0, 1, 0],
-                               [-np.sin(theta[1]), 0, np.cos(theta[1])]])
+                               [-np.sin(theta), 0, np.cos(theta)]])
 
-                Rz = np.array([[np.cos(theta[2]), -np.sin(theta[2]), 0],
-                               [np.sin(theta[2]), np.cos(theta[2]), 0],
+                Rz = np.array([[np.cos(theta), -np.sin(theta), 0],
+                               [np.sin(theta), np.cos(theta), 0],
                                [0, 0, 1]])
             
                 Rm = Rx@Ry@Rz

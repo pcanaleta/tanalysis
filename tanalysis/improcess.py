@@ -3,9 +3,15 @@ import tifffile as tiff
 import numpy as np
 import shutil
 import liffile as lif
-import cupy as cp
-from cupyx.scipy import ndimage
-from skimage import measure, morphology
+from skimage import morphology, measure
+from skimage.filters import gaussian, threshold_otsu
+
+try:
+    import cupy as cp
+    from cupyx.scipy import ndimage
+    CUPY = True
+except:
+    CUPY = False
 
 try:
     from readlif.reader import LifFile # type: ignore
@@ -52,18 +58,23 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
 
     #List all given files
     file_list = []
-    if os.path.isfile(dirname):
-        file_list.append(dirname)              
+    if os.path.isdir(dirname):
+        for filename in os.listdir(dirname):
+            file_list.append(os.path.join(dirname, filename))
+    elif os.path.isfile(dirname):
+        file_list.append(dirname)
     else:
         raise ValueError('ERROR: no directory or file submitted')
     
     #Read all files in file_list
     i=0
     for file in file_list:
+        if not os.path.isfile(file):
+            continue
         ext = os.path.splitext(file)[-1].lower()
         file_name = os.path.split(file)[-1].replace(ext, "")
-        im_name.append(f'{file_name.replace(ext, '')}-{i}')
-        i=i+1
+        im_name.append(f'{file_name}-{i}')
+        i = i + 1
         #For tiff files
         if ext==".tif" or ext==".tiff":
             image = np.asarray(tiff.imread(file))
@@ -89,7 +100,7 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
 
     return im_list, im_name, im_info
 
-def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:str="",):
+def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str, modelpath:str="", gpu:bool=True):
     '''
     This function segmentates the images with the model selected. The segmented images are saved in the specified directory. 
     
@@ -99,6 +110,7 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
         im_name (list): list of lists of image names
         savedir (string): path to directory where images will be saved
         modelpath (string): path to pretained model 
+        gpu (bool): whether to use GPU when available
 
     Returns:
         list: List of directories where images are saved
@@ -110,12 +122,14 @@ def cellposeseg(images:list[np.ndarray], dim:int, im_name:list[str], savedir:str
     if not CELLPOSE:
         raise ImportError('ERROR: Cellpose package is not installed, please use: pip install cellpose[all]')
     
+    use_gpu = bool(CUPY and gpu)
+
     io.logger_setup()
 
-    model = models.CellposeModel(gpu=True)
+    model = models.CellposeModel(gpu=use_gpu)
 
     if os.path.isfile(modelpath):
-        model = models.CellposeModel(gpu=True, pretrained_model=modelpath)
+        model = models.CellposeModel(gpu=use_gpu, pretrained_model=modelpath)
 
     if dim == 3:
         do_3D = True
@@ -174,25 +188,85 @@ def concatenate(dirname, remove_original=False):
     
     return
 
-def LoG(sigma_x:float, sigma_y:float, sigma_z:float):
-    '''
-    The function calculates the laplacian of the gaussian of the image in order to find the borders of the objects present in the photo.
-    It only accepts 3D images (for now).
-    
-    Params:
-        sigma_x (float): float value for deviation in x axis 
-        sigma_y (float): float value for deviation in y axis 
-        sigma_z (float): float value for deviation in z axis 
-    '''
-    n = 7
-    z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
-    z_filter = cp.exp(-(z*z/(2*sigma_z**2)))
-    y_filter = cp.exp(-(y*y/(2*sigma_y**2)))
-    x_filter = cp.exp(-(x*x/(2*sigma_x**2)))
-    final_filter = (1/(sigma_x*sigma_y*sigma_z*(2*np.pi)**(3/2)))*((1-x*x/(sigma_x**2))/(sigma_x**2)+(1-y*y/(sigma_y**2))/(sigma_y**2)+(1-z*z/(sigma_z**2))/(sigma_z**2))*(z_filter*x_filter*y_filter)
-    return final_filter
+def _label_volume(volume: np.ndarray,
+                  sigmas: tuple[float, float, float] = (1.0, 1.0, 1.0),
+                  threshold: float | None = 0.1,
+                  min_size: int = 50,
+                  max_size: int | None = None,
+                  fill_holes: bool = True) -> np.ndarray:
+    '''Label a single 3D volume using Gaussian smoothing and size-based cleaning.'''
+    if volume.ndim != 3:
+        raise ValueError('Expected a 3D volume for _label_volume.')
 
-def LoG_convolve(img:np.ndarray, sigma_x:float, sigma_y:float, sigma_z:float):
+    if isinstance(sigmas, (float, int)):
+        sigmas = (float(sigmas),) * 3
+    elif len(sigmas) == 1:
+        sigmas = (float(sigmas[0]),) * 3
+    elif len(sigmas) != 3:
+        raise ValueError('sigmas must be a float or tuple/list of 3 floats.')
+
+    volume = volume.astype(np.float32)
+    smoothed = gaussian(volume, sigma=sigmas, preserve_range=True, truncate=3.0)
+
+    if threshold is None:
+        threshold_value = threshold_otsu(smoothed)
+    elif 0 < threshold < 1:
+        threshold_value = np.max(smoothed) * threshold
+    else:
+        threshold_value = threshold
+
+    binary = smoothed > threshold_value
+    if fill_holes:
+        binary = morphology.remove_small_holes(binary)
+
+    binary = morphology.remove_small_objects(binary)
+    binary = morphology.opening(binary, morphology.ball(1))
+
+    labels = measure.label(binary)
+    if max_size is not None and max_size > 0:
+        sizes = np.bincount(labels.ravel())
+        large_labels = np.where((sizes > max_size) & (np.arange(sizes.shape[0]) > 0))[0]
+        if large_labels.size > 0:
+            remove_mask = np.isin(labels, large_labels)
+            labels[remove_mask] = 0
+            labels = measure.label(labels > 0)
+
+    return labels
+
+def label_cells(image: np.ndarray,
+                sigmas: tuple[float, float, float] = (1.0, 1.0, 1.0),
+                th: float | None = 0.1,
+                min_size: int = 50,
+                max_size: int | None = None,
+                fill_holes: bool = True) -> np.ndarray:
+    '''
+    Robust 3D/4D cell detector using Gaussian smoothing, adaptive thresholding, and morphological cleanup.
+
+    Args:
+        image (np.ndarray): 3D volume or 4D time series (T, Z, Y, X).
+        sigmas (tuple): Gaussian smoothing sigma per spatial axis.
+        th (float): absolute threshold or fraction of max intensity. If None, Otsu thresholding is used.
+        min_size (int): minimum object size in voxels to keep.
+        max_size (int, optional): maximum object size in voxels to keep.
+        fill_holes (bool): whether to fill holes in segmented objects.
+
+    Returns:
+        np.ndarray: labeled segmentation volume(s).
+    '''
+    if image.ndim == 4:
+        labeled_stack = [
+            _label_volume(frame, sigmas=sigmas, threshold=th, min_size=min_size,
+                          max_size=max_size, fill_holes=fill_holes)
+            for frame in image
+        ]
+        return np.stack(labeled_stack, axis=0)
+    elif image.ndim == 3:
+        return _label_volume(image, sigmas=sigmas, threshold=th, min_size=min_size,
+                             max_size=max_size, fill_holes=fill_holes)
+    else:
+        raise ValueError('label_cells expects a 3D volume or 4D time series.')
+
+def LoG_convolve(img:np.ndarray, sigma_x:float, sigma_y:float, sigma_z:float, n:int=7):
     '''
     The function creates and convolves a kernel to the image in order to apply the Laplacian of Gaussian filter to the image. Borders of the objects in the image 
     are marked after applying the kernel.
@@ -202,30 +276,32 @@ def LoG_convolve(img:np.ndarray, sigma_x:float, sigma_y:float, sigma_z:float):
         sigma_x (float): value for deviation in x axis
         sigma_y (float): value for deviation in y axis
         sigma_z (float): value for deviation in z axis
+        n (int): size of the kernel
     '''
-    filter_log = LoG(sigma_x, sigma_y, sigma_z)
+    def LoG(sigma_x:float, sigma_y:float, sigma_z:float, n:int=7):
+        '''
+        The function calculates the laplacian of the gaussian of the image in order to find the borders of the objects present in the photo.
+        It only accepts 3D images (for now).
+    
+        Params:
+            sigma_x (float): float value for deviation in x axis 
+            sigma_y (float): float value for deviation in y axis 
+            sigma_z (float): float value for deviation in z axis 
+            n (int): size of the kernel
+        '''
+        z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
+        z_filter = cp.exp(-(z*z/(2*sigma_z**2)))
+        y_filter = cp.exp(-(y*y/(2*sigma_y**2)))
+        x_filter = cp.exp(-(x*x/(2*sigma_x**2)))
+        final_filter = (1/(sigma_x*sigma_y*sigma_z*(2*np.pi)**(3/2)))*((1-x*x/(sigma_x**2))/(sigma_x**2)+(1-y*y/(sigma_y**2))/(sigma_y**2)+(1-z*z/(sigma_z**2))/(sigma_z**2))*(z_filter*x_filter*y_filter)
+        return final_filter
+
+    filter_log = LoG(sigma_x, sigma_y, sigma_z, n)
     image = ndimage.convolve(img, filter_log)
     image = cp.square(image)
     return cp.asarray(image)
 
-def fit_gaussian(sigma_x:float, sigma_y:float, sigma_z:float):
-    '''
-    This function creates a Gaussian kernel using the given sigma values.
-
-    Params:
-        sigma_x (float): value for deviation in x axis
-        sigma_y (float): value for deviation in y axis
-        sigma_z (float): value for deviation in z axis    
-    '''
-    n = 7
-    z,y,x = cp.ogrid[-n//2:n//2+1, -n//2:n//2+1, -n//2:n//2+1]
-    z_filter = cp.exp(-(z*z/(2*sigma_z**2)))
-    y_filter = cp.exp(-(y*y/(2*sigma_y**2)))
-    x_filter = cp.exp(-(x*x/(2*sigma_x**2)))
-    final_filter = (x_filter*y_filter*z_filter)/(sigma_x*sigma_y*sigma_z*(2*np.pi)**(3/2))
-    return final_filter
-
-def label_cells(image:np.ndarray, sigmas:list, th:float):
+def label_cells_deprecated(image:np.ndarray, sigmas:list, th:float):
     '''
     This function will create a labeled image where each detected cell will have a different gray level value assigned.
     
@@ -237,6 +313,9 @@ def label_cells(image:np.ndarray, sigmas:list, th:float):
     T,Z,Y,X = image.shape
     result = np.empty(shape=(T,Z,Y,X), dtype=np.int16)
     i=0
+
+    if not CUPY:
+        raise ValueError('ERROR: cannot import cupy, please use: pip install cupy-cuda12x')
 
     for frame in image:
         max_value = np.max(frame)
