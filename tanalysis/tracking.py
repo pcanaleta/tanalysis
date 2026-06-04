@@ -62,21 +62,34 @@ def track_labeled_video(label_sequence, max_distance=10.0, min_length=2):
     """Track labeled objects over a 3D labeled video sequence.
 
     Args:
-        label_sequence (list of numpy.ndarray): list of 3D label volumes.
+        label_sequence (numpy.ndarray): list of 3D label volumes.
         max_distance (float): maximum centroid distance to link objects between frames.
         min_length (int): minimum number of frames for a track to be returned.
 
     Returns:
         list: List of track dictionaries with keys 'track_id' and 'entries'.
     """
-    if not label_sequence:
-        return []
-
     tracks = []
     active_tracks = []
     next_track_id = 1
 
-    first_centroids = compute_centroids(label_sequence[0])
+    # Normalize input: accept a list/sequence of 3D label volumes or a 4D ndarray (T, Z, Y, X)
+    if isinstance(label_sequence, np.ndarray):
+        if label_sequence.ndim == 4:
+            frames = list(label_sequence)
+        elif label_sequence.ndim == 3:
+            frames = [label_sequence]
+        else:
+            raise ValueError("label_sequence must be a 3D volume or a 4D time series")
+    else:
+        # assume it's an iterable of 3D volumes
+        frames = list(label_sequence)
+
+    if len(frames) == 0:
+        return []
+
+    # Initialize tracks from first frame
+    first_centroids = compute_centroids(frames[0])
     for label, centroid in first_centroids.items():
         track = {
             "track_id": next_track_id,
@@ -89,7 +102,7 @@ def track_labeled_video(label_sequence, max_distance=10.0, min_length=2):
 
     prev_centroids = first_centroids
 
-    for frame_index, volume in enumerate(label_sequence[1:], start=1):
+    for frame_index, volume in enumerate(frames[1:], start=1):
         curr_centroids = compute_centroids(volume)
         mapping = match_labels(prev_centroids, curr_centroids, max_distance=max_distance)
 
@@ -100,7 +113,11 @@ def track_labeled_video(label_sequence, max_distance=10.0, min_length=2):
             prev_label = track["last_label"]
             if prev_label in mapping:
                 curr_label = mapping[prev_label]
-                centroid = curr_centroids[curr_label]
+                centroid = curr_centroids.get(curr_label)
+                if centroid is None:
+                    # current label not present (shouldn't happen), drop the track
+                    tracks.append(track)
+                    continue
                 track["last_label"] = curr_label
                 track["last_centroid"] = centroid
                 track["entries"].append(TrackEntry(frame=frame_index, label=curr_label, centroid=centroid))
@@ -140,5 +157,5 @@ def summarize_track(track):
         "start_frame": min(frames) if frames else None,
         "end_frame": max(frames) if frames else None,
         "length": len(frames),
-        "centroids": centroids,
+        "centroids": np.asarray(centroids),
     }
