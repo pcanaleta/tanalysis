@@ -1,5 +1,6 @@
 import numpy as np
 from collections import namedtuple
+from scipy.optimize import linear_sum_assignment
 
 TrackEntry = namedtuple("TrackEntry", ["frame", "label", "centroid"])
 
@@ -23,13 +24,14 @@ def compute_centroids(label_volume):
     return centroids
 
 
-def match_labels(prev_centroids, curr_centroids, max_distance=10.0):
-    """Match labels between two frames using nearest centroids.
+def match_labels(prev_centroids, curr_centroids, max_distance=10.0, method="lap"):
+    """Match labels between two frames using centroid assignment.
 
     Args:
         prev_centroids (dict): label -> centroid from previous frame.
         curr_centroids (dict): label -> centroid from current frame.
         max_distance (float): maximum allowed centroid distance for a match.
+        method (str): matching method, either "lap" or "greedy".
 
     Returns:
         dict: Mapping from previous frame label to current frame label.
@@ -37,11 +39,26 @@ def match_labels(prev_centroids, curr_centroids, max_distance=10.0):
     if not prev_centroids or not curr_centroids:
         return {}
 
+    prev_labels = np.array(list(prev_centroids.keys()), dtype=int)
+    curr_labels = np.array(list(curr_centroids.keys()), dtype=int)
+    prev_points = np.array([prev_centroids[label] for label in prev_labels], dtype=float)
+    curr_points = np.array([curr_centroids[label] for label in curr_labels], dtype=float)
+
+    if method == "lap":
+        cost_matrix = np.linalg.norm(prev_points[:, None, :] - curr_points[None, :, :], axis=2)
+        row_idx, col_idx = linear_sum_assignment(cost_matrix)
+        mapping = {}
+        for i, j in zip(row_idx, col_idx):
+            if cost_matrix[i, j] <= max_distance:
+                mapping[int(prev_labels[i])] = int(curr_labels[j])
+        return mapping
+
+    # fallback to greedy nearest-neighbor assignment
     pairs = []
-    for prev_label, prev_centroid in prev_centroids.items():
-        for curr_label, curr_centroid in curr_centroids.items():
-            dist = np.linalg.norm(np.array(prev_centroid) - np.array(curr_centroid))
-            pairs.append((dist, prev_label, curr_label))
+    for prev_label, prev_point in zip(prev_labels, prev_points):
+        for curr_label, curr_point in zip(curr_labels, curr_points):
+            dist = np.linalg.norm(prev_point - curr_point)
+            pairs.append((dist, int(prev_label), int(curr_label)))
 
     pairs.sort(key=lambda x: x[0])
     matched_prev = set()
@@ -52,19 +69,20 @@ def match_labels(prev_centroids, curr_centroids, max_distance=10.0):
             break
         if prev_label in matched_prev or curr_label in matched_curr:
             continue
-        mapping[int(prev_label)] = int(curr_label)
+        mapping[prev_label] = curr_label
         matched_prev.add(prev_label)
         matched_curr.add(curr_label)
     return mapping
 
 
-def track_labeled_video(label_sequence, max_distance=10.0, min_length=2):
+def track_labeled_video(label_sequence, max_distance=10.0, min_length=2, method="lap"):
     """Track labeled objects over a 3D labeled video sequence.
 
     Args:
         label_sequence (numpy.ndarray): list of 3D label volumes.
         max_distance (float): maximum centroid distance to link objects between frames.
         min_length (int): minimum number of frames for a track to be returned.
+        method (str): matching method, either "lap" or "greedy".
 
     Returns:
         list: List of track dictionaries with keys 'track_id' and 'entries'.
@@ -104,7 +122,12 @@ def track_labeled_video(label_sequence, max_distance=10.0, min_length=2):
 
     for frame_index, volume in enumerate(frames[1:], start=1):
         curr_centroids = compute_centroids(volume)
-        mapping = match_labels(prev_centroids, curr_centroids, max_distance=max_distance)
+        mapping = match_labels(
+            prev_centroids,
+            curr_centroids,
+            max_distance=max_distance,
+            method=method,
+        )
 
         used_curr_labels = set(mapping.values())
         new_active_tracks = []
