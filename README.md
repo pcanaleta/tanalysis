@@ -38,10 +38,6 @@ Basic workflow is described in trajectory_analysis.ipynb.
 - All images in a batch must have consistent dimensions.
 - GPU acceleration significantly improves performance for large datasets
 
-## Authors
-
-Pau Canaleta Vicente - mailto:pcanaleta@ibecbarcelona.eu
-
 ## Citation
 
 If you use tanalysis in your research, please cite this repository.
