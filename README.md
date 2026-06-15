@@ -35,8 +35,8 @@ Basic workflow is described in trajectory_analysis.ipynb.
 
 ## Notes
 
-· All images in a batch must have consistent dimensions.
-· GPU acceleration significantly improves performance for large datasets
+- All images in a batch must have consistent dimensions.
+- GPU acceleration significantly improves performance for large datasets
 
 ## Authors
 
