@@ -1,6 +1,8 @@
 import numpy as np
 from collections import namedtuple
 from scipy.optimize import linear_sum_assignment
+import xml.etree.ElementTree as ET
+from datetime import datetime
 
 TrackEntry = namedtuple("TrackEntry", ["frame", "label", "centroid"])
 
@@ -170,15 +172,24 @@ def track_labeled_video(label_sequence, max_distance=10.0, min_length=2, method=
     ]
     return filtered_tracks
 
-
-def summarize_track(track):
-    """Summarize a single cell track."""
-    frames = [entry.frame for entry in track["entries"]]
-    centroids = [entry.centroid for entry in track["entries"]]
-    return {
-        "track_id": track["track_id"],
-        "start_frame": min(frames) if frames else None,
-        "end_frame": max(frames) if frames else None,
-        "length": len(frames),
-        "centroids": np.asarray(centroids),
-    }
+def save_trackmate_xml(tracks, savepath, dt=1.0, time_units='sec', space_units='pixel'):
+    root = ET.Element('Tracks', {
+        'nTracks': str(len(tracks)),
+        'spaceUnits': space_units,
+        'frameInterval': str(dt),
+        'timeUnits': time_units,
+        'generationDateTime': datetime.now().strftime('%a, %d %b %Y %H:%M:%S'),
+        'from': 'track_labeled_video'
+    })
+    for track in tracks:
+        particle = ET.SubElement(root, 'particle', {'nSpots': str(len(track['entries']))})
+        for entry in track['entries']:
+            z, y, x = entry.centroid
+            ET.SubElement(particle, 'detection', {
+                't': str(entry.frame),
+                'x': str(float(x)),
+                'y': str(float(y)),
+                'z': str(float(z))
+            })
+    ET.ElementTree(root).write(savepath, encoding='UTF-8', xml_declaration=True)
+    return
