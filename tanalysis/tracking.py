@@ -4,7 +4,32 @@ from scipy.optimize import linear_sum_assignment
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover - pandas is a hard dependency for this module
+    pd = None
+
+try:
+    from laptrack import LapTrack
+except ImportError:  # pragma: no cover - optional dependency
+    LapTrack = None
+
 TrackEntry = namedtuple("TrackEntry", ["frame", "label", "centroid"])
+
+
+def _normalize_frames(label_sequence):
+    """Normalize a 3D volume, a 4D time-series, or an iterable of 3D volumes."""
+    if isinstance(label_sequence, np.ndarray):
+        if label_sequence.ndim == 4:
+            return list(label_sequence)
+        if label_sequence.ndim == 3:
+            return [label_sequence]
+        raise ValueError("label_sequence must be a 3D volume or a 4D time series")
+
+    frames = list(label_sequence)
+    if len(frames) == 0:
+        return []
+    return frames
 
 
 def compute_centroids(label_volume):
@@ -77,36 +102,101 @@ def match_labels(prev_centroids, curr_centroids, max_distance=10.0, method="lap"
     return mapping
 
 
-def track_labeled_video(label_sequence, max_distance=10.0, min_length=2, method="lap"):
+def centroids_to_dataframe(label_sequence, frame_col="frame"):
+    """Convert a labeled video into a centroid table compatible with LapTrack."""
+    if pd is None:
+        raise ImportError("pandas is required to build a LapTrack-style centroid table")
+
+    frames = _normalize_frames(label_sequence)
+    rows = []
+    for frame_idx, volume in enumerate(frames):
+        for label, centroid in compute_centroids(volume).items():
+            z, y, x = centroid
+            rows.append(
+                {
+                    frame_col: int(frame_idx),
+                    "label": int(label),
+                    "z": float(z),
+                    "y": float(y),
+                    "x": float(x),
+                }
+            )
+
+    return pd.DataFrame(rows, columns=[frame_col, "label", "z", "y", "x"])
+
+
+def _tracks_from_laptrack_dataframe(centroid_df, max_distance, min_length):
+    """Track centroids with LapTrack if the dependency is available."""
+    if LapTrack is None:
+        raise ImportError("laptrack is not installed")
+
+    tracker = LapTrack(
+        metric="sqeuclidean",
+        splitting_metric="sqeuclidean",
+        cutoff=max_distance**2,
+        gap_closing_cutoff=max_distance**2,
+        splitting_cutoff=max_distance**2,
+    )
+    track_df, _, _ = tracker.predict_dataframe(
+        centroid_df,
+        coordinate_cols=["z", "y", "x"],
+        frame_col="frame",
+        only_coordinate_cols=False,
+    )
+
+    if track_df.empty:
+        return []
+
+    tracks = []
+    for track_id, group in track_df.groupby("track_id", sort=True):
+        ordered = group.sort_values("frame")
+        entries = [
+            TrackEntry(
+                frame=int(row["frame"]),
+                label=int(row["label"]),
+                centroid=(float(row["z"]), float(row["y"]), float(row["x"])),
+            )
+            for _, row in ordered.iterrows()
+        ]
+        if len(entries) >= min_length:
+            tracks.append({"track_id": len(tracks) + 1, "entries": entries})
+
+    return tracks
+
+
+def track_labeled_video(label_sequence, max_distance=10.0, min_length=2, method="lap", use_laptrack=True):
     """Track labeled objects over a 3D labeled video sequence.
+
+    The default workflow builds a centroid table and uses a LapTrack-style pipeline
+    when the optional ``laptrack`` dependency is available. When it is not, the
+    function falls back to the simpler centroid assignment logic used previously.
 
     Args:
         label_sequence (numpy.ndarray): list of 3D label volumes.
         max_distance (float): maximum centroid distance to link objects between frames.
         min_length (int): minimum number of frames for a track to be returned.
         method (str): matching method, either "lap" or "greedy".
+        use_laptrack (bool): whether to try the LapTrack-based centroid pipeline.
 
     Returns:
         list: List of track dictionaries with keys 'track_id' and 'entries'.
     """
+    frames = _normalize_frames(label_sequence)
+    if len(frames) == 0:
+        return []
+
+    if use_laptrack and pd is not None and LapTrack is not None:
+        try:
+            centroid_df = centroids_to_dataframe(frames)
+            if not centroid_df.empty:
+                return _tracks_from_laptrack_dataframe(centroid_df, max_distance, min_length)
+        except Exception:
+            # Fall back to the simpler assignment pipeline if LapTrack is not usable.
+            pass
+
     tracks = []
     active_tracks = []
     next_track_id = 1
-
-    # Normalize input: accept a list/sequence of 3D label volumes or a 4D ndarray (T, Z, Y, X)
-    if isinstance(label_sequence, np.ndarray):
-        if label_sequence.ndim == 4:
-            frames = list(label_sequence)
-        elif label_sequence.ndim == 3:
-            frames = [label_sequence]
-        else:
-            raise ValueError("label_sequence must be a 3D volume or a 4D time series")
-    else:
-        # assume it's an iterable of 3D volumes
-        frames = list(label_sequence)
-
-    if len(frames) == 0:
-        return []
 
     # Initialize tracks from first frame
     first_centroids = compute_centroids(frames[0])
@@ -172,24 +262,32 @@ def track_labeled_video(label_sequence, max_distance=10.0, min_length=2, method=
     ]
     return filtered_tracks
 
-def save_trackmate_xml(tracks, savepath, dt=1.0, time_units='sec', space_units='pixel'):
-    root = ET.Element('Tracks', {
-        'nTracks': str(len(tracks)),
-        'spaceUnits': space_units,
-        'frameInterval': str(dt),
-        'timeUnits': time_units,
-        'generationDateTime': datetime.now().strftime('%a, %d %b %Y %H:%M:%S'),
-        'from': 'track_labeled_video'
-    })
+
+def save_trackmate_xml(tracks, savepath, dt=1.0, time_units="sec", space_units="pixel"):
+    root = ET.Element(
+        "Tracks",
+        {
+            "nTracks": str(len(tracks)),
+            "spaceUnits": space_units,
+            "frameInterval": str(dt),
+            "timeUnits": time_units,
+            "generationDateTime": datetime.now().strftime("%a, %d %b %Y %H:%M:%S"),
+            "from": "track_labeled_video",
+        },
+    )
     for track in tracks:
-        particle = ET.SubElement(root, 'particle', {'nSpots': str(len(track['entries']))})
-        for entry in track['entries']:
+        particle = ET.SubElement(root, "particle", {"nSpots": str(len(track["entries"]))})
+        for entry in track["entries"]:
             z, y, x = entry.centroid
-            ET.SubElement(particle, 'detection', {
-                't': str(entry.frame),
-                'x': str(float(x)),
-                'y': str(float(y)),
-                'z': str(float(z))
-            })
-    ET.ElementTree(root).write(savepath, encoding='UTF-8', xml_declaration=True)
+            ET.SubElement(
+                particle,
+                "detection",
+                {
+                    "t": str(entry.frame),
+                    "x": str(float(x)),
+                    "y": str(float(y)),
+                    "z": str(float(z)),
+                },
+            )
+    ET.ElementTree(root).write(savepath, encoding="UTF-8", xml_declaration=True)
     return
