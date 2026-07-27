@@ -51,7 +51,8 @@ def xml_to_xlsx(dirname:str, xyscale:float, zdist:float, dt:int):
     axlsxdata = np.array(xlsxdata)
 
     #create a directory where excel tracks will be saved
-    savedir = os.path.join(os.path.split(dirname)[0], 'excel_tracks')
+    savedir = os.path.split(dirname)[0]
+    savedir = savedir.replace('xml_tracks', 'excel_tracks')
     if not os.path.exists(savedir):
         os.makedirs(os.path.abspath(savedir))
     

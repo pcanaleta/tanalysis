@@ -193,8 +193,9 @@ def _label_volume(volume: np.ndarray,
                   threshold: float | None = 0.1,
                   min_size: int = 50,
                   max_size: int | None = None,
-                  fill_holes: bool = True) -> np.ndarray:
-    '''Label a single 3D volume using Gaussian smoothing and size-based cleaning.'''
+                  fill_holes: bool = True,
+                  connectivity: int = 3) -> np.ndarray:
+    '''Label a single 3D volume using Gaussian smoothing and size-based cleanup.'''
     if volume.ndim != 3:
         raise ValueError('Expected a 3D volume for _label_volume.')
 
@@ -205,7 +206,17 @@ def _label_volume(volume: np.ndarray,
     elif len(sigmas) != 3:
         raise ValueError('sigmas must be a float or tuple/list of 3 floats.')
 
+    volume = np.asarray(volume, dtype=np.float32)
+    if not np.isfinite(volume).all():
+        volume = np.nan_to_num(volume, nan=0.0, posinf=np.finfo(np.float32).max, neginf=0.0)
+
+    if volume.size == 0:
+        return np.zeros(volume.shape, dtype=np.int32)
+
     volume = volume.astype(np.float32)
+    if volume.std() > 0:
+        volume = (volume - volume.mean()) / (volume.std() + 1e-8)
+
     smoothed = gaussian(volume, sigma=sigmas, preserve_range=True, truncate=3.0)
 
     if threshold is None:
@@ -216,29 +227,43 @@ def _label_volume(volume: np.ndarray,
         threshold_value = threshold
 
     binary = smoothed > threshold_value
+
     if fill_holes:
         binary = morphology.remove_small_holes(binary)
 
-    binary = morphology.remove_small_objects(binary)
+    if min_size is not None and min_size > 1:
+        binary = morphology.remove_small_objects(binary, connectivity=connectivity)
+
+    binary = morphology.closing(binary, morphology.ball(1))
     binary = morphology.opening(binary, morphology.ball(1))
 
-    labels = measure.label(binary)
+    labels = measure.label(binary, connectivity=connectivity)
+
+    if min_size is not None and min_size > 1:
+        sizes = np.bincount(labels.ravel())
+        small_labels = np.where((sizes < min_size) & (np.arange(sizes.shape[0]) > 0))[0]
+        if small_labels.size > 0:
+            labels[np.isin(labels, small_labels)] = 0
+            labels = measure.label(labels > 0, connectivity=connectivity)
+
     if max_size is not None and max_size > 0:
         sizes = np.bincount(labels.ravel())
         large_labels = np.where((sizes > max_size) & (np.arange(sizes.shape[0]) > 0))[0]
         if large_labels.size > 0:
             remove_mask = np.isin(labels, large_labels)
             labels[remove_mask] = 0
-            labels = measure.label(labels > 0)
+            labels = measure.label(labels > 0, connectivity=connectivity)
 
-    return labels
+    return labels.astype(np.int32)
+
 
 def label_cells(image: np.ndarray,
                 sigmas: tuple[float, float, float] = (1.0, 1.0, 1.0),
                 th: float | None = 0.1,
                 min_size: int = 50,
                 max_size: int | None = None,
-                fill_holes: bool = True) -> np.ndarray:
+                fill_holes: bool = True,
+                connectivity: int = 3) -> np.ndarray:
     '''
     Robust 3D/4D cell detector using Gaussian smoothing, adaptive thresholding, and morphological cleanup.
 
@@ -249,20 +274,22 @@ def label_cells(image: np.ndarray,
         min_size (int): minimum object size in voxels to keep.
         max_size (int, optional): maximum object size in voxels to keep.
         fill_holes (bool): whether to fill holes in segmented objects.
+        connectivity (int): connectivity used for connected-component analysis.
 
     Returns:
         np.ndarray: labeled segmentation volume(s).
     '''
+    image = np.asarray(image)
     if image.ndim == 4:
         labeled_stack = [
             _label_volume(frame, sigmas=sigmas, threshold=th, min_size=min_size,
-                          max_size=max_size, fill_holes=fill_holes)
+                          max_size=max_size, fill_holes=fill_holes, connectivity=connectivity)
             for frame in image
         ]
         return np.stack(labeled_stack, axis=0)
     elif image.ndim == 3:
         return _label_volume(image, sigmas=sigmas, threshold=th, min_size=min_size,
-                             max_size=max_size, fill_holes=fill_holes)
+                             max_size=max_size, fill_holes=fill_holes, connectivity=connectivity)
     else:
         raise ValueError('label_cells expects a 3D volume or 4D time series.')
 
