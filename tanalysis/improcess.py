@@ -3,6 +3,7 @@ import tifffile as tiff
 import numpy as np
 import shutil
 import liffile as lif
+import czifile as czi
 from skimage import morphology, measure
 from skimage.filters import gaussian, threshold_otsu
 
@@ -28,6 +29,7 @@ except:
 def imread(dirname:str, tiles:bool=False, gpu:bool=False):
     '''
     This function reads images from files or directories. It only accepts .tif, .tiff or .lif files for now. 
+    .czi files are also accepted but they are not tested yet.
     .tif or .tiff files should be images of the channel to read, as the function is not prepared to accept files with this extensions with multiple channels.
     For .lif files, the function is prepared to read raw .lif images with 1 images in the file and channel of interest being the second channel.
 
@@ -95,6 +97,11 @@ def imread(dirname:str, tiles:bool=False, gpu:bool=False):
                     im_info['scale'] = image_0.info['scale']
                     if tiles:
                         im_info['mosaic_position'] = image_0.info['mosaic_position']
+        #For czi files
+        elif ext==".czi":
+            image = np.asarray(czi.imread(file))
+            im_list.append(image)
+
         else:
             continue
 
